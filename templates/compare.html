@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="comparison">
+    <div class="comparison__head">
+        <h1 class="scan-panel__heading">So sánh kết quả quét</h1>
+        <p class="scan-panel__lead">
+            Hai website được quét tuần tự bằng cùng một bộ kiểm tra. Score cao hơn thể hiện
+            nhiều phát hiện có mức độ nghiêm trọng hơn.
+        </p>
+    </div>
+
+    <div class="comparison-grid">
+        {% for report in reports %}
+        <article class="comparison-card">
+            <div class="report__head">
+                <div>
+                    <div class="report__target-label">Website {{ "A" if loop.index == 1 else "B" }}</div>
+                    <div class="report__target">{{ report.target }}</div>
+                    <div class="report__meta">
+                        Quét lúc {{ report.scanned_at }} &middot;
+                        hoàn thành trong {{ report.scan_duration_sec }}s
+                    </div>
+                </div>
+                <div class="risk-badge risk-badge--{{ report.risk_level|lower }}">
+                    <div class="risk-badge__score">{{ report.risk_score }}</div>
+                    <div class="risk-badge__level">{{ report.risk_level }}</div>
+                </div>
+            </div>
+
+            <div class="stat-row">
+                {% for severity in ["High", "Medium", "Low", "Info"] %}
+                <div class="stat-tile stat-tile--{{ severity|lower }}">
+                    <div class="stat-tile__count">{{ report.summary_count[severity] }}</div>
+                    <div class="stat-tile__label">{{ severity }}</div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <h2 class="section-heading">Phát hiện ({{ report.findings|length }})</h2>
+            {% if report.findings %}
+            <div class="finding-list">
+                {% for finding in report.findings %}
+                <div class="finding finding--{{ finding.severity|lower }}">
+                    <div class="finding__top">
+                        <span class="finding__severity">{{ finding.severity }}</span>
+                        <span class="finding__module">{{ finding.module }}</span>
+                    </div>
+                    <div class="finding__title">{{ finding.title }}</div>
+                    <div class="finding__desc">{{ finding.description }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-note">Không phát hiện vấn đề đáng chú ý.</p>
+            {% endif %}
+        </article>
+        {% endfor %}
+    </div>
+
+    <a href="{{ url_for('index') }}" class="btn btn--ghost back-link">So sánh URL khác</a>
+</section>
+{% endblock %}
