@@ -8,6 +8,8 @@ Cơ chế: Hoàn toàn passive - chỉ phân tích lại response trang chủ đ
 KHÔNG gửi thêm request nào khác.
 """
 
+import time
+
 from bs4 import BeautifulSoup
 
 CMS_SIGNATURES = {
@@ -35,8 +37,12 @@ def run(response):
     response: requests.Response của trang chủ (đã fetch từ scanner.py, tái sử dụng
     lại - không gửi thêm request).
     """
+    started = time.monotonic()
     result = {
         "module": "cms_checker",
+        "status": "success",
+        "error": None,
+        "duration_sec": 0,
         "detected": [],
     }
 
@@ -68,6 +74,8 @@ def run(response):
                     "cms": cms_name,
                     "matched_by": matched_by,
                     "severity": "Info",
+                    "verification": "suspected",
+                    "confidence": "medium",
                     "description": f"Phát hiện dấu hiệu CMS {cms_name} qua: {', '.join(matched_by)}.",
                 }
             )
@@ -78,8 +86,11 @@ def run(response):
                 "cms": "Unknown",
                 "matched_by": [],
                 "severity": "Info",
+                "verification": "suspected",
+                "confidence": "low",
                 "description": "Không phát hiện dấu hiệu của các CMS phổ biến (WordPress, Joomla, Drupal, Magento).",
             }
         )
 
+    result["duration_sec"] = round(time.monotonic() - started, 3)
     return result

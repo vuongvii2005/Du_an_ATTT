@@ -7,6 +7,9 @@
         <div>
             <div class="report__target-label">Mục tiêu đã quét</div>
             <div class="report__target">{{ report.target }}</div>
+            {% if report.requested_target != report.target %}
+            <div class="report__meta">URL ban đầu: {{ report.requested_target }}</div>
+            {% endif %}
             <div class="report__meta">
                 Quét lúc {{ report.scanned_at }}
                 {% if report.scan_duration_sec is not none %}
@@ -20,6 +23,14 @@
             <div class="risk-badge__level">{{ report.risk_level }}</div>
         </div>
     </div>
+
+    {% if not report.scan_complete %}
+    <div class="alert alert--warning">
+        Báo cáo chưa hoàn chỉnh: {{ report.incomplete_modules|length }} module lỗi hoặc bị bỏ qua.
+    </div>
+    {% endif %}
+
+    <p class="risk-explanation">{{ report.risk_explanation }}</p>
 
     <div class="stat-row">
         <div class="stat-tile stat-tile--high">
@@ -49,22 +60,63 @@
             <div class="finding__top">
                 <span class="finding__severity">{{ finding.severity }}</span>
                 <span class="finding__module">{{ finding.module }}</span>
+                <span class="finding__verification">{{ "Đã xác minh" if finding.verification == "verified" else "Nghi ngờ" }}</span>
             </div>
             <div class="finding__title">{{ finding.title }}</div>
             <div class="finding__desc">{{ finding.description }}</div>
+            {% if finding.evidence %}<div class="finding__detail"><strong>Bằng chứng:</strong> {{ finding.evidence }}</div>{% endif %}
+            {% if finding.cause %}<div class="finding__detail"><strong>Nguyên nhân:</strong> {{ finding.cause }}</div>{% endif %}
+            {% if finding.recommendation %}<div class="finding__detail"><strong>Khuyến nghị:</strong> {{ finding.recommendation }}</div>{% endif %}
         </div>
         {% endfor %}
     </div>
     {% else %}
-    <p class="empty-note">Không phát hiện vấn đề nào đáng chú ý với bộ kiểm tra hiện tại.</p>
+    <p class="empty-note">
+        {{ "Không phát hiện vấn đề nào với các kiểm tra đã hoàn thành." if report.scan_complete else "Không đủ dữ liệu để kết luận vì một số kiểm tra chưa hoàn thành." }}
+    </p>
     {% endif %}
+
+    <h2 class="section-heading">Trạng thái module</h2>
+    <div class="status-list">
+        {% for item in report.module_status %}
+        <div class="status-item status-item--{{ item.status }}">
+            <span class="status-item__name">{{ item.module }}</span>
+            <span>{{ item.status }}</span>
+            {% if item.error %}<span class="status-item__error">{{ item.error }}</span>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
 
     <h2 class="section-heading">Thông tin bổ sung</h2>
     <div class="detail-grid">
 
         <div class="detail-card">
+            <div class="detail-card__title">TLS/SSL</div>
+            {% set tls = report.raw_module_results.get('tls_checker', {}) %}
+            {% set cert = tls.get('certificate', {}) %}
+            {% set cipher = tls.get('cipher', {}) %}
+            {% set redirect = tls.get('http_redirect', {}) %}
+            {% if tls %}
+            <ul class="mono-list">
+                <li>HTTPS: {{ "Có" if tls.https_supported == true else ("Không" if tls.https_supported == false else "Chưa kết luận") }}</li>
+                <li>Chứng chỉ hợp lệ: {{ "Có" if cert.valid == true else ("Không" if cert.valid == false else "Chưa kết luận") }}</li>
+                <li>Hostname khớp: {{ "Có" if cert.hostname_matches == true else ("Không" if cert.hostname_matches == false else "Chưa kết luận") }}</li>
+                <li>Chủ thể: {{ cert.subject or "Không có dữ liệu" }}</li>
+                <li>Đơn vị cấp: {{ cert.issuer or "Không có dữ liệu" }}</li>
+                <li>Giao thức phiên: {{ tls.protocol or "Không có dữ liệu" }}</li>
+                <li>Cipher: {{ cipher.name or "Không có dữ liệu" }}{% if cipher.bits %} ({{ cipher.bits }} bit){% endif %}</li>
+                <li>Hết hạn: {{ cert.not_after or "Không có dữ liệu" }}{% if cert.get('days_remaining') is not none %} (còn {{ cert.days_remaining }} ngày){% endif %}</li>
+                <li>HTTP → HTTPS: {{ "Có" if redirect.redirects_to_https == true else ("Không" if redirect.redirects_to_https == false else "Bỏ qua/chưa kết luận") }}</li>
+            </ul>
+            {% if tls.error %}<p class="muted">{{ tls.error }}</p>{% endif %}
+            {% else %}
+            <p class="muted">Không có dữ liệu TLS/SSL.</p>
+            {% endif %}
+        </div>
+
+        <div class="detail-card">
             <div class="detail-card__title">Robots.txt</div>
-            {% set robots = report.raw_module_results.robots_checker %}
+            {% set robots = report.raw_module_results.get('robots_checker', {}) %}
             {% if robots and robots.exists %}
                 <p>Tìm thấy {{ robots.disallowed_paths|length }} dòng Disallow.</p>
                 {% if robots.disallowed_paths %}
@@ -83,7 +135,7 @@
 
         <div class="detail-card">
             <div class="detail-card__title">Cổng TCP đang mở</div>
-            {% set ports = report.raw_module_results.port_checker %}
+            {% set ports = report.raw_module_results.get('port_checker', {}) %}
             {% if ports and ports.resolved_ip %}
                 <p class="muted">IP: {{ ports.resolved_ip }}</p>
             {% endif %}
@@ -102,7 +154,7 @@
 
         <div class="detail-card">
             <div class="detail-card__title">Header phản hồi (raw)</div>
-            {% set headers = report.raw_module_results.header_checker.raw_headers %}
+            {% set headers = report.raw_module_results.get('header_checker', {}).get('raw_headers', {}) %}
             {% if headers %}
             <ul class="mono-list mono-list--headers">
                 {% for key, value in headers.items() %}

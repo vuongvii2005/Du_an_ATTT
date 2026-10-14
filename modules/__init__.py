@@ -10,6 +10,7 @@ from . import dir_checker
 from . import robots_checker
 from . import cms_checker
 from . import port_checker
+from . import tls_checker
 
 __all__ = [
     "header_checker",
@@ -17,4 +18,5 @@ __all__ = [
     "robots_checker",
     "cms_checker",
     "port_checker",
+    "tls_checker",
 ]
