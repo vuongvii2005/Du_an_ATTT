@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="scan-panel">
+    <h1 class="scan-panel__heading">Quét và so sánh hai website</h1>
+    <p class="scan-panel__lead">
+        Nhập hai URL để xem báo cáo cạnh nhau. Công cụ sẽ gửi các HTTP request thông thường
+        để phân tích header, thư mục nhạy cảm, robots.txt, dấu hiệu CMS và một số cổng phổ
+        biến — không thực hiện bất kỳ hành vi khai thác nào.
+    </p>
+
+    {% if error %}
+    <div class="alert alert--error" role="alert">
+        <span class="alert__icon">!</span>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <form action="{{ url_for('compare') }}" method="post" class="scan-form">
+        <label for="url_a" class="scan-form__label">Website A</label>
+        <div class="scan-form__row scan-form__row--stack-mobile">
+            <input
+                type="text"
+                id="url_a"
+                name="url_a"
+                class="scan-form__input"
+                placeholder="Ví dụ: https://site-a.example"
+                value="{{ previous_url_a or '' }}"
+                required
+                autofocus
+            >
+        </div>
+        <label for="url_b" class="scan-form__label scan-form__label--second">Website B</label>
+        <div class="scan-form__row">
+            <input
+                type="text"
+                id="url_b"
+                name="url_b"
+                class="scan-form__input"
+                placeholder="Ví dụ: https://site-b.example"
+                value="{{ previous_url_b or '' }}"
+                required
+            >
+            <button type="submit" class="btn btn--primary">So sánh 2 website</button>
+        </div>
+    </form>
+
+    <div class="module-grid">
+        <div class="module-card">
+            <div class="module-card__label">Header Check</div>
+            <p>Rà soát security header còn thiếu và rò rỉ thông tin server.</p>
+        </div>
+        <div class="module-card">
+            <div class="module-card__label">Directory Check</div>
+            <p>Dò một số path/file nhạy cảm thường bị lộ công khai.</p>
+        </div>
+        <div class="module-card">
+            <div class="module-card__label">Robots.txt Check</div>
+            <p>Phân tích robots.txt để tìm khu vực được yêu cầu ẩn.</p>
+        </div>
+        <div class="module-card">
+            <div class="module-card__label">CMS Detection</div>
+            <p>Nhận diện WordPress, Joomla, Drupal, Magento qua dấu hiệu công khai.</p>
+        </div>
+        <div class="module-card">
+            <div class="module-card__label">Port Scan</div>
+            <p>Kiểm tra nhanh các cổng TCP phổ biến đang mở.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}
