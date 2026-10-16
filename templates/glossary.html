@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Từ điển giải thích &middot; Lightweight Web Vulnerability Scanner{% endblock %}
+
+{% block content %}
+<section class="glossary">
+    <h1 class="scan-panel__heading">Từ điển giải thích</h1>
+    <p class="scan-panel__lead">
+        Giải thích bằng ngôn ngữ đời thường cho từng loại phát hiện của công cụ: đó là gì, vì sao nguy hiểm và cách khắc phục.
+    </p>
+
+    <nav class="glossary__index" aria-label="Mục lục">
+        {% for key, entry in entries.items() %}
+        <a href="#{{ key }}">{{ entry.title }}</a>
+        {% endfor %}
+    </nav>
+
+    {% for key, entry in entries.items() %}
+    <article class="glossary__entry" id="{{ key }}">
+        <h2>{{ entry.title }}</h2>
+        <section class="explain"><h4>Đây là gì?</h4><p>{{ entry.what }}</p></section>
+        <section class="explain"><h4>Vì sao nguy hiểm?</h4><p>{{ entry.why }}</p></section>
+        <section class="explain explain--fix"><h4>Cách khắc phục</h4><pre class="explain__fix">{{ entry.fix }}</pre></section>
+        {% if entry.learn_more %}
+        <p class="explain__links">Tìm hiểu thêm:
+            {% for link in entry.learn_more %}
+            <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>{% if not loop.last %} &middot; {% endif %}
+            {% endfor %}
+        </p>
+        {% endif %}
+    </article>
+    {% endfor %}
+
+    <article class="glossary__entry" id="generic">
+        <h2>{{ fallback.title }}</h2>
+        <section class="explain"><h4>Đây là gì?</h4><p>{{ fallback.what }}</p></section>
+        <section class="explain"><h4>Vì sao nguy hiểm?</h4><p>{{ fallback.why }}</p></section>
+        <section class="explain explain--fix"><h4>Cách khắc phục</h4><pre class="explain__fix">{{ fallback.fix }}</pre></section>
+    </article>
+
+    <a href="{{ url_for('index') }}" class="btn btn--ghost back-link">Về trang quét</a>
+</section>
+{% endblock %}

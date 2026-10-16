@@ -140,3 +140,51 @@ def test_response_size_limit_stops_oversized_body(monkeypatch):
 
     with pytest.raises(ScanLimitError, match="lớn hơn"):
         session.get("https://example.com")
+
+
+def _clear_local_env(monkeypatch):
+    for name in ("SCANNER_HOST", "SCANNER_ALLOW_LOCAL", "SCANNER_DEMO_MODE", "SCANNER_ALLOWED_TARGETS"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_localhost_is_scannable_by_default_when_app_is_local_only(monkeypatch):
+    _clear_local_env(monkeypatch)
+    guard = TargetGuard.from_env()
+
+    assert guard.validate_url("http://127.0.0.1:5001").hostname == "127.0.0.1"
+    assert guard.validate_url("http://[::1]:5001").hostname == "::1"
+    with pytest.raises(TargetGuardError):
+        guard.validate_url("http://192.168.1.10")
+    with pytest.raises(TargetGuardError):
+        guard.validate_url("http://169.254.169.254")
+    with pytest.raises(TargetGuardError):
+        guard.validate_url("http://127.0.0.2")  # chỉ localhost/127.0.0.1/::1
+
+
+def test_local_scan_can_be_disabled_or_is_off_when_app_is_exposed(monkeypatch):
+    _clear_local_env(monkeypatch)
+    monkeypatch.setenv("SCANNER_ALLOW_LOCAL", "false")
+    with pytest.raises(TargetGuardError):
+        TargetGuard.from_env().validate_url("http://127.0.0.1")
+
+    _clear_local_env(monkeypatch)
+    monkeypatch.setenv("SCANNER_HOST", "0.0.0.0")
+    with pytest.raises(TargetGuardError):
+        TargetGuard.from_env().validate_url("http://127.0.0.1")
+
+
+def test_public_site_cannot_redirect_scanner_into_localhost_even_when_local_enabled(monkeypatch):
+    guard = TargetGuard(allow_local=True, resolver=resolver_for(PUBLIC_IP))
+    initial = guard.validate_url("https://example.com")
+    session = GuardedSession(guard, initial_target=initial)
+    calls = []
+
+    def fake_request(_self, method, url, **_kwargs):
+        calls.append(url)
+        return FakeResponse(status_code=302, headers={"Location": "http://127.0.0.1/admin"}, url=url)
+
+    monkeypatch.setattr(requests.Session, "request", fake_request)
+
+    with pytest.raises(TargetGuardError):
+        session.get("https://example.com", allow_redirects=True)
+    assert len(calls) == 1

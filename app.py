@@ -7,6 +7,7 @@ import secrets
 
 from flask import Flask, abort, render_template, request, session
 
+import knowledge
 import scanner
 
 
@@ -57,6 +58,10 @@ def create_app(test_config=None):
     @app.route("/", methods=["GET"])
     def index():
         return render_template("index.html")
+
+    @app.route("/glossary", methods=["GET"])
+    def glossary():
+        return render_template("glossary.html", entries=knowledge.ENTRIES, fallback=knowledge.FALLBACK)
 
     @app.route("/scan", methods=["POST"])
     def scan():

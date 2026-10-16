@@ -17,6 +17,8 @@ METADATA_IPS = {
     ipaddress.ip_address("168.63.129.16"),
 }
 REDIRECT_CODES = {301, 302, 303, 307, 308}
+LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+LOCAL_BIND_HOSTS = {"", "127.0.0.1", "localhost", "::1"}
 
 
 class TargetGuardError(ValueError):
@@ -46,7 +48,10 @@ def _env_list(name):
 class TargetGuard:
     """Resolve, authorize, and classify every network target before use."""
 
-    def __init__(self, allowed_targets=(), demo_mode=False, demo_targets=(), resolver=None):
+    def __init__(
+        self, allowed_targets=(), demo_mode=False, demo_targets=(), resolver=None, allow_local=False
+    ):
+        self.allow_local = bool(allow_local)
         self.allowed_targets = tuple(item.lower() for item in allowed_targets)
         self.demo_mode = bool(demo_mode)
         self.demo_targets = tuple(item.lower().rstrip(".") for item in demo_targets)
@@ -58,13 +63,22 @@ class TargetGuard:
             os.getenv("SCANNER_DEMO_MODE", "").lower() in {"1", "true", "yes"}
             and os.getenv("SCANNER_DEMO_CONFIRM", "") == "I_UNDERSTAND_LOCAL_SCAN_RISK"
         )
+        # Quét localhost mặc định được bật, nhưng chỉ khi app chỉ phục vụ máy này
+        # (SCANNER_HOST là loopback). Đặt SCANNER_ALLOW_LOCAL=false để tắt.
+        bound_locally = os.getenv("SCANNER_HOST", "").strip().lower() in LOCAL_BIND_HOSTS
+        allow_local = (
+            os.getenv("SCANNER_ALLOW_LOCAL", "true").strip().lower() not in {"0", "false", "no"}
+            and bound_locally
+        )
         return cls(
             allowed_targets=_env_list("SCANNER_ALLOWED_TARGETS"),
             demo_mode=demo_mode,
             demo_targets=_env_list("SCANNER_DEMO_TARGETS"),
+            allow_local=allow_local,
         )
 
-    def validate_url(self, raw_url):
+    def validate_url(self, raw_url, allow_local=None):
+        """allow_local=False buộc từ chối loopback (dùng cho redirect từ website công khai)."""
         raw_url = (raw_url or "").strip()
         if not raw_url:
             raise TargetGuardError("URL không được để trống.")
@@ -100,8 +114,14 @@ class TargetGuard:
 
         ips = self._resolve_all(hostname, port)
         demo_allowed = self.demo_mode and hostname in self.demo_targets
+        local_allowed = (
+            self.allow_local
+            and allow_local is not False
+            and hostname in LOCAL_HOSTNAMES
+            and all(ip.is_loopback for ip in ips)
+        )
         for ip in ips:
-            if self._is_forbidden(ip) and not demo_allowed:
+            if self._is_forbidden(ip) and not (demo_allowed or local_allowed):
                 raise TargetGuardError(
                     f"Mục tiêu {hostname} phân giải tới địa chỉ không được phép quét: {ip}"
                 )
@@ -224,6 +244,9 @@ class GuardedSession(requests.Session):
         self.max_redirects = max_redirects
         self.request_count = 0
         self.trust_env = False
+        # Chỉ lần quét bắt đầu từ localhost mới được redirect tiếp trong localhost;
+        # website công khai không thể chuyển hướng scanner vào máy nội bộ.
+        self.local_scan = bool(initial_target and initial_target.hostname in LOCAL_HOSTNAMES)
         self._targets = {}
         if initial_target:
             self._remember(initial_target)
@@ -241,7 +264,7 @@ class GuardedSession(requests.Session):
         return fresh
 
     def target_for(self, url):
-        return self._remember(self.guard.validate_url(url))
+        return self._remember(self.guard.validate_url(url, allow_local=self.local_scan))
 
     def request(self, method, url, **kwargs):
         follow_redirects = kwargs.pop("allow_redirects", True)
@@ -252,7 +275,7 @@ class GuardedSession(requests.Session):
             # Validate the *requested* URL and check its DNS answer against the
             # pinned one. The request must go to this URL's own path/query: the
             # remembered TargetInfo only describes the origin's first URL.
-            requested = self.guard.validate_url(current_url)
+            requested = self.guard.validate_url(current_url, allow_local=self.local_scan)
             self._remember(requested)
             self._check_limits()
             self.request_count += 1

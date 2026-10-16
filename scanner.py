@@ -22,7 +22,6 @@ import report as report_module
 from target_guard import GuardedSession, ScanLimitError, TargetGuard, TargetGuardError
 
 
-REQUEST_TIMEOUT = 5
 USER_AGENT = "LightweightWebVulnScanner/1.1 (+bounded-active-recon)"
 
 
@@ -35,6 +34,7 @@ def _env_int(name, default, minimum=1, maximum=None):
     return min(value, maximum) if maximum is not None else value
 
 
+REQUEST_TIMEOUT = _env_int("SCANNER_REQUEST_TIMEOUT", 15, maximum=60)
 MAX_CONCURRENT_SCANS = _env_int("SCANNER_MAX_CONCURRENT", 2, maximum=10)
 SCAN_SEMAPHORE = threading.BoundedSemaphore(MAX_CONCURRENT_SCANS)
 LOGGER = logging.getLogger(__name__)
@@ -147,7 +147,17 @@ def run_scan(raw_url, guard=None, session=None):
             )
         session.headers.update({"User-Agent": USER_AGENT})
 
-        homepage_response = check_connectivity(initial_target.base_url, session)
+        try:
+            homepage_response = check_connectivity(initial_target.base_url, session)
+        except ScannerError:
+            # Site nhỏ chỉ có HTTP: nếu người dùng không ghi scheme thì thử lại bằng http://.
+            if "://" in raw_url or initial_target.scheme != "https":
+                raise
+            try:
+                initial_target = guard.validate_url("http://" + raw_url.strip())
+            except TargetGuardError:
+                raise ScannerError("Không thể kết nối tới website bằng HTTPS hoặc HTTP.")
+            homepage_response = check_connectivity(initial_target.base_url, session)
         response_url = getattr(homepage_response, "url", None) or initial_target.base_url
         try:
             effective_target = (
