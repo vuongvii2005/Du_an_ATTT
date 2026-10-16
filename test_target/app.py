@@ -12,17 +12,20 @@ from flask import Flask, Response, redirect
 app = Flask(__name__)
 
 
+# Dummy content only. Each fixture is shaped so that the directory checker's
+# content signatures (dir_checker._sensitive_evidence) recognise it, which lets
+# the scanner demonstrate "verified" High findings without any real secret.
 EXPOSED_FIXTURES = {
-    ".env": "TEST_FIXTURE_ONLY=1\nFAKE_SECRET=not-a-real-secret\n",
-    ".git/config": "[test-fixture]\nrepository = dummy\n",
-    "backup.zip": "dummy backup fixture\n",
-    "backup.sql": "-- dummy SQL backup fixture\n",
-    "config.php.bak": "<?php // dummy config fixture ?>\n",
-    "phpinfo.php": "Test fixture pretending to be phpinfo\n",
+    ".env": "APP_KEY=dummy-fixture-value\nDB_PASSWORD=not-a-real-password\nTEST_FIXTURE_ONLY=1\n",
+    ".git/config": "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[test-fixture]\n\trepository = dummy\n",
+    "backup.zip": b"PK\x03\x04dummy backup fixture (not a real archive)\n",
+    "backup.sql": "-- MySQL dump (dummy fixture)\nCREATE TABLE fixture (id INT);\nINSERT INTO fixture VALUES (1);\n",
+    "config.php.bak": "<?php // dummy fixture\n$db_password = 'not-a-real-password';\n?>\n",
+    "phpinfo.php": "<html><body>phpinfo() dummy fixture - PHP Version 0.0-test</body></html>\n",
     "administrator/": "Dummy administrator fixture\n",
     "wp-admin/": "Dummy WordPress admin fixture\n",
     ".well-known/security.txt": "Contact: security@example.test\n",
-    "web.config": "<!-- dummy web.config fixture -->\n",
+    "web.config": "<configuration><system.web></system.web></configuration>\n",
 }
 
 

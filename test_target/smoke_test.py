@@ -1,5 +1,6 @@
 """Run an end-to-end scan against the local test target."""
 
+import os
 import subprocess
 import sys
 import time
@@ -11,6 +12,12 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_APP = Path(__file__).with_name("app.py")
 TARGET_URL = "http://127.0.0.1:8080"
+
+# The scanner refuses loopback targets unless Demo Mode is explicitly enabled
+# (see target_guard.py). Enable it for this process only, for 127.0.0.1 only.
+os.environ["SCANNER_DEMO_MODE"] = "true"
+os.environ["SCANNER_DEMO_CONFIRM"] = "I_UNDERSTAND_LOCAL_SCAN_RISK"
+os.environ["SCANNER_DEMO_TARGETS"] = "127.0.0.1"
 
 sys.path.insert(0, str(ROOT))
 from scanner import run_scan  # noqa: E402
@@ -43,6 +50,15 @@ def main():
         assert any(f["module"] == "Directory Check" for f in findings)
         assert any(f["module"] == "Robots.txt Check" for f in findings)
         assert any(f["module"] == "CMS Detection" for f in findings)
+        assert any(f["module"] == "TLS/SSL Check" for f in findings) or (
+            "tls_checker" in report["raw_module_results"]
+        )
+        assert any(
+            f["module"] == "Directory Check" and f["verification"] == "verified"
+            and f["severity"] == "High"
+            for f in findings
+        )
+        assert report["scan_complete"], report["incomplete_modules"]
         assert any(
             port["port"] == 8080
             for port in report["raw_module_results"]["port_checker"]["open_ports"]

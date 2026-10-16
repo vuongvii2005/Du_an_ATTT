@@ -6,6 +6,8 @@ Chức năng: Lấy và phân tích file robots.txt để tìm các path bị "D
 Cơ chế: Passive - chỉ gửi 1 GET request duy nhất tới /robots.txt.
 """
 
+import time
+
 import requests
 
 TIMEOUT = 5
@@ -14,15 +16,22 @@ TIMEOUT = 5
 SENSITIVE_KEYWORDS = ["admin", "backup", "config", "private", "secret", "database", "wp-admin", "login"]
 
 
-def run(base_url, session=None):
+def run(base_url, session=None, deadline=None):
+    started = time.monotonic()
     sess = session or requests.Session()
     result = {
         "module": "robots_checker",
+        "status": "success",
         "exists": False,
         "disallowed_paths": [],
         "sensitive_hints": [],
         "error": None,
+        "duration_sec": 0,
     }
+
+    if deadline is not None and time.monotonic() >= deadline:
+        result.update(status="skipped", error="Bỏ qua vì đã hết tổng thời gian quét.")
+        return result
 
     url = f"{base_url}/robots.txt"
     try:
@@ -43,16 +52,22 @@ def run(base_url, session=None):
                                     "path": path,
                                     "keyword": kw,
                                     "severity": "Low",
+                                    "verification": "suspected",
+                                    "confidence": "medium",
                                     "description": f"Disallow path chứa từ khoá nhạy cảm '{kw}' - có thể gợi ý khu vực quan trọng của site.",
                                 }
                             )
                             break
 
     except requests.exceptions.Timeout:
+        result["status"] = "error"
         result["error"] = "Timeout khi lấy robots.txt."
     except requests.exceptions.SSLError:
+        result["status"] = "error"
         result["error"] = "Lỗi SSL/TLS khi lấy robots.txt."
-    except requests.exceptions.RequestException as e:
-        result["error"] = f"Không thể lấy robots.txt: {str(e)}"
+    except requests.exceptions.RequestException:
+        result["status"] = "error"
+        result["error"] = "Không thể lấy robots.txt."
 
+    result["duration_sec"] = round(time.monotonic() - started, 3)
     return result
