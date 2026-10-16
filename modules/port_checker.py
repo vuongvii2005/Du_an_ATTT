@@ -11,7 +11,9 @@ Chỉ sử dụng module này trên hệ thống bạn sở hữu hoặc đã đ
 Quét cổng trên hệ thống của người khác mà không được phép có thể vi phạm pháp luật.
 """
 
+import ipaddress
 import socket
+import time
 
 # Danh sách cổng phổ biến cần kiểm tra (rút gọn, KHÔNG quét toàn bộ 65535 cổng)
 COMMON_PORTS = {
@@ -30,32 +32,45 @@ COMMON_PORTS = {
     8443: "HTTPS-Alt",
 }
 
-SOCKET_TIMEOUT = 1.5  # giây - giữ ngắn để tránh việc quét bị treo quá lâu
+SOCKET_TIMEOUT = 0.5
 
 
-def run(hostname):
+def run(hostname, resolved_ip=None, deadline=None):
     """
     hostname: tên domain hoặc địa chỉ IP (KHÔNG kèm scheme http/https)
     """
+    started = time.monotonic()
     result = {
         "module": "port_checker",
+        "status": "success",
         "resolved_ip": None,
         "open_ports": [],
         "error": None,
+        "duration_sec": 0,
     }
 
-    try:
-        ip = socket.gethostbyname(hostname)
-        result["resolved_ip"] = ip
-    except socket.gaierror:
-        result["error"] = f"Không thể phân giải hostname: {hostname}"
-        return result
+    if resolved_ip is None:
+        try:
+            resolved_ip = socket.gethostbyname(hostname)
+        except socket.gaierror:
+            result.update(status="error", error=f"Không thể phân giải hostname: {hostname}")
+            return result
+    result["resolved_ip"] = resolved_ip
+    ip_version = ipaddress.ip_address(resolved_ip).version
+    family = socket.AF_INET6 if ip_version == 6 else socket.AF_INET
 
     for port, service in COMMON_PORTS.items():
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(SOCKET_TIMEOUT)
+        if deadline is not None and time.monotonic() >= deadline:
+            result.update(status="error", error="Quét cổng dừng sớm vì hết tổng thời gian quét.")
+            break
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        timeout = SOCKET_TIMEOUT
+        if deadline is not None:
+            timeout = min(timeout, max(0.05, deadline - time.monotonic()))
+        sock.settimeout(timeout)
         try:
-            code = sock.connect_ex((ip, port))
+            destination = (resolved_ip, port, 0, 0) if family == socket.AF_INET6 else (resolved_ip, port)
+            code = sock.connect_ex(destination)
             if code == 0:
                 # Các dịch vụ quản trị/nhạy cảm nếu mở public thì mức rủi ro cao hơn
                 severity = "Medium" if port in (21, 23, 3306, 3389) else "Info"
@@ -64,6 +79,8 @@ def run(hostname):
                         "port": port,
                         "service": service,
                         "severity": severity,
+                        "verification": "verified",
+                        "confidence": "high",
                         "description": f"Cổng {port} ({service}) đang mở và có thể kết nối được.",
                     }
                 )
@@ -74,4 +91,5 @@ def run(hostname):
         finally:
             sock.close()
 
+    result["duration_sec"] = round(time.monotonic() - started, 3)
     return result

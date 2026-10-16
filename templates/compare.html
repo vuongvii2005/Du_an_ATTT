@@ -11,11 +11,13 @@
     </div>
 
     <div class="comparison-grid">
-        {% for report in reports %}
+        {% for entry in comparison_results %}
         <article class="comparison-card">
+            {% if entry.report %}
+            {% set report = entry.report %}
             <div class="report__head">
                 <div>
-                    <div class="report__target-label">Website {{ "A" if loop.index == 1 else "B" }}</div>
+                    <div class="report__target-label">Website {{ entry.label }}</div>
                     <div class="report__target">{{ report.target }}</div>
                     <div class="report__meta">
                         Quét lúc {{ report.scanned_at }} &middot;
@@ -27,6 +29,15 @@
                     <div class="risk-badge__level">{{ report.risk_level }}</div>
                 </div>
             </div>
+
+            {% if not report.scan_complete %}
+            <div class="alert alert--warning">
+                Báo cáo chưa hoàn chỉnh:
+                {% for item in report.incomplete_modules %}
+                    {{ item.module }} ({{ item.status }}){% if not loop.last %}, {% endif %}
+                {% endfor %}.
+            </div>
+            {% endif %}
 
             <div class="stat-row">
                 {% for severity in ["High", "Medium", "Low", "Info"] %}
@@ -45,14 +56,43 @@
                     <div class="finding__top">
                         <span class="finding__severity">{{ finding.severity }}</span>
                         <span class="finding__module">{{ finding.module }}</span>
+                        <span class="finding__verification">{{ "Đã xác minh" if finding.verification == "verified" else "Nghi ngờ" }}</span>
                     </div>
                     <div class="finding__title">{{ finding.title }}</div>
                     <div class="finding__desc">{{ finding.description }}</div>
+                    {% if finding.evidence %}<div class="finding__detail"><strong>Bằng chứng:</strong> {{ finding.evidence }}</div>{% endif %}
+                    {% if finding.cause %}<div class="finding__detail"><strong>Nguyên nhân:</strong> {{ finding.cause }}</div>{% endif %}
+                    {% if finding.recommendation %}<div class="finding__detail"><strong>Khuyến nghị:</strong> {{ finding.recommendation }}</div>{% endif %}
                 </div>
                 {% endfor %}
             </div>
             {% else %}
-            <p class="empty-note">Không phát hiện vấn đề đáng chú ý.</p>
+            <p class="empty-note">
+                {{ "Không phát hiện vấn đề với các kiểm tra đã hoàn thành." if report.scan_complete else "Không đủ dữ liệu để kết luận." }}
+            </p>
+            {% endif %}
+
+            {% set tls = report.raw_module_results.get('tls_checker', {}) %}
+            {% set cert = tls.get('certificate', {}) %}
+            {% set cipher = tls.get('cipher', {}) %}
+            <div class="tls-summary">
+                <div class="detail-card__title">TLS/SSL</div>
+                {% if tls %}
+                <ul class="mono-list">
+                    <li>HTTPS: {{ "Có" if tls.https_supported == true else ("Không" if tls.https_supported == false else "Chưa kết luận") }}</li>
+                    <li>Chứng chỉ: {{ "Hợp lệ" if cert.valid == true else ("Không hợp lệ" if cert.valid == false else "Chưa kết luận") }}</li>
+                    <li>Phiên: {{ tls.protocol or "Không có dữ liệu" }} / {{ cipher.name or "Không có dữ liệu" }}</li>
+                </ul>
+                {% if tls.error %}<p class="muted">{{ tls.error }}</p>{% endif %}
+                {% else %}<p class="muted">Không có dữ liệu TLS/SSL.</p>{% endif %}
+            </div>
+            {% else %}
+            <div class="report__target-label">Website {{ entry.label }}</div>
+            <div class="report__target">{{ entry.url }}</div>
+            <div class="alert alert--error comparison-card__error">
+                <span class="alert__icon">!</span>
+                <span>{{ entry.error }}</span>
+            </div>
             {% endif %}
         </article>
         {% endfor %}

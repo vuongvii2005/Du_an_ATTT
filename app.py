@@ -1,90 +1,138 @@
 # -*- coding: utf-8 -*-
-"""
-app.py
-Flask Web UI cho Lightweight Web Vulnerability Scanner.
+"""Flask UI for the bounded web reconnaissance scanner."""
 
-Chức năng:
-- GET  /       : hiển thị form nhập URL cần quét.
-- POST /scan   : chạy scanner.py và hiển thị kết quả dưới dạng báo cáo trực quan.
-- POST /compare: chạy hai URL và hiển thị báo cáo cạnh nhau.
+import hmac
+import os
+import secrets
 
-Lưu ý: Đây là công cụ thu thập thông tin thụ động (passive recon). Chỉ nên sử
-dụng trên hệ thống bạn sở hữu hoặc đã được cấp phép rõ ràng để kiểm tra.
-"""
-
-from flask import Flask, render_template, request
+from flask import Flask, abort, render_template, request, session
 
 import scanner
 
-app = Flask(__name__)
 
-
-@app.route("/", methods=["GET"])
-def index():
-    return render_template("index.html")
-
-
-@app.route("/scan", methods=["POST"])
-def scan():
-    target_url = request.form.get("url", "").strip()
-
-    if not target_url:
-        return render_template("index.html", error="Vui lòng nhập URL cần quét.")
-
+def _env_port():
     try:
-        report = scanner.run_scan(target_url)
-        return render_template("result.html", report=report)
+        port = int(os.getenv("SCANNER_PORT", "5000"))
+    except ValueError:
+        return 5000
+    return port if 1 <= port <= 65535 else 5000
 
-    except scanner.ScannerError as e:
-        # Lỗi đã được xử lý rõ ràng: Timeout, SSL Error, Connection Failure, URL không hợp lệ...
-        return render_template("index.html", error=str(e), previous_url=target_url)
 
-    except Exception as e:
-        # Lỗi phát sinh ngoài dự kiến - vẫn hiển thị thân thiện, không để app crash
-        return render_template(
-            "index.html",
-            error=f"Đã xảy ra lỗi không xác định trong quá trình quét: {str(e)}",
-            previous_url=target_url,
+def create_app(test_config=None):
+    app = Flask(__name__)
+    secret_key = os.getenv("SCANNER_SECRET_KEY") or secrets.token_hex(32)
+    app.config.update(
+        SECRET_KEY=secret_key,
+        CSRF_ENABLED=True,
+        MAX_CONTENT_LENGTH=16 * 1024,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.getenv("SCANNER_COOKIE_SECURE", "").lower()
+        in {"1", "true", "yes"},
+    )
+    if test_config:
+        app.config.update(test_config)
+    if not os.getenv("SCANNER_SECRET_KEY") and not app.config.get("TESTING"):
+        app.logger.warning(
+            "SCANNER_SECRET_KEY chưa được đặt; đang dùng khóa ngẫu nhiên chỉ phù hợp chạy cục bộ."
         )
 
+    def csrf_token():
+        token = session.get("_csrf_token")
+        if not token:
+            token = secrets.token_urlsafe(32)
+            session["_csrf_token"] = token
+        return token
 
-@app.route("/compare", methods=["POST"])
-def compare():
-    first_url = request.form.get("url_a", "").strip()
-    second_url = request.form.get("url_b", "").strip()
+    app.jinja_env.globals["csrf_token"] = csrf_token
 
-    if not first_url or not second_url:
-        return render_template(
-            "index.html",
-            error="Vui lòng nhập đủ 2 URL để so sánh.",
-            previous_url_a=first_url,
-            previous_url_b=second_url,
-        )
+    @app.before_request
+    def validate_csrf():
+        if request.method == "POST" and app.config.get("CSRF_ENABLED", True):
+            expected = session.get("_csrf_token", "")
+            supplied = request.form.get("_csrf_token", "")
+            if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+                abort(400, description="Phiên biểu mẫu không hợp lệ hoặc đã hết hạn.")
 
-    try:
-        reports = [
-            scanner.run_scan(first_url),
-            scanner.run_scan(second_url),
+    @app.route("/", methods=["GET"])
+    def index():
+        return render_template("index.html")
+
+    @app.route("/scan", methods=["POST"])
+    def scan():
+        target_url = request.form.get("url", "").strip()
+        if not target_url:
+            return render_template("index.html", error="Vui lòng nhập URL cần quét."), 400
+        try:
+            report = scanner.run_scan(target_url)
+            return render_template("result.html", report=report)
+        except scanner.ScannerError as exc:
+            return render_template(
+                "index.html", error=str(exc), previous_url=target_url
+            ), 400
+        except Exception:
+            app.logger.exception("Lỗi không mong đợi khi quét một URL")
+            return render_template(
+                "index.html",
+                error="Đã xảy ra lỗi nội bộ. Không có request quét nào được tiếp tục.",
+                previous_url=target_url,
+            ), 500
+
+    @app.route("/compare", methods=["POST"])
+    def compare():
+        urls = [
+            ("A", request.form.get("url_a", "").strip()),
+            ("B", request.form.get("url_b", "").strip()),
         ]
-        return render_template("compare.html", reports=reports)
+        if any(not url for _, url in urls):
+            return render_template(
+                "index.html",
+                error="Vui lòng nhập đủ 2 URL để so sánh.",
+                previous_url_a=urls[0][1],
+                previous_url_b=urls[1][1],
+            ), 400
 
-    except scanner.ScannerError as e:
-        return render_template(
-            "index.html",
-            error=str(e),
-            previous_url_a=first_url,
-            previous_url_b=second_url,
-        )
+        comparison_results = []
+        for label, target_url in urls:
+            try:
+                comparison_results.append(
+                    {"label": label, "url": target_url, "report": scanner.run_scan(target_url), "error": None}
+                )
+            except scanner.ScannerError as exc:
+                comparison_results.append(
+                    {"label": label, "url": target_url, "report": None, "error": str(exc)}
+                )
+            except Exception:
+                app.logger.exception("Lỗi không mong đợi khi quét website %s", label)
+                comparison_results.append(
+                    {
+                        "label": label,
+                        "url": target_url,
+                        "report": None,
+                        "error": "Đã xảy ra lỗi nội bộ khi quét website này.",
+                    }
+                )
+        return render_template("compare.html", comparison_results=comparison_results)
 
-    except Exception as e:
+    @app.errorhandler(400)
+    def bad_request(error):
         return render_template(
-            "index.html",
-            error=f"Đã xảy ra lỗi không xác định trong quá trình quét: {str(e)}",
-            previous_url_a=first_url,
-            previous_url_b=second_url,
-        )
+            "index.html", error=getattr(error, "description", "Yêu cầu không hợp lệ.")
+        ), 400
+
+    @app.errorhandler(404)
+    def not_found(_error):
+        return render_template("index.html", error="Không tìm thấy trang được yêu cầu."), 404
+
+    @app.errorhandler(500)
+    def internal_error(_error):
+        return render_template("index.html", error="Đã xảy ra lỗi nội bộ."), 500
+
+    return app
+
+
+app = create_app()
 
 
 if __name__ == "__main__":
-    # debug=True chỉ nên dùng trong môi trường phát triển (development)
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host=os.getenv("SCANNER_HOST", "127.0.0.1"), port=_env_port(), debug=False)

@@ -2,11 +2,11 @@
 
 {% block content %}
 <section class="scan-panel">
-    <h1 class="scan-panel__heading">Quét hoặc so sánh website</h1>
+    <h1 class="scan-panel__heading">Quét và so sánh website</h1>
     <p class="scan-panel__lead">
-        Nhập một URL để quét riêng hoặc nhập hai URL để xem báo cáo cạnh nhau. Công cụ sẽ gửi
-        các HTTP request thông thường để phân tích header, thư mục nhạy cảm, robots.txt, dấu
-        hiệu CMS và một số cổng phổ biến — không thực hiện bất kỳ hành vi khai thác nào.
+        Công cụ thực hiện reconnaissance chủ động có giới hạn bằng các HTTP request thông thường
+        để phân tích header, thư mục nhạy cảm, robots.txt, dấu hiệu CMS và một số cổng phổ
+        biến — không thực hiện bất kỳ hành vi khai thác nào.
     </p>
 
     {% if error %}
@@ -16,33 +16,36 @@
     </div>
     {% endif %}
 
-    <h2 class="section-heading">Quét một website</h2>
+    <div class="form-section">
+        <h2 class="section-heading section-heading--form">Quét một website</h2>
+        <form action="{{ url_for('scan') }}" method="post" class="scan-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <label for="url" class="scan-form__label">URL mục tiêu</label>
+            <div class="scan-form__row">
+                <input
+                    type="text"
+                    id="url"
+                    name="url"
+                    class="scan-form__input"
+                    placeholder="Ví dụ: https://example.com"
+                    value="{{ previous_url or '' }}"
+                    required
+                    autofocus
+                >
+                <button type="submit" class="btn btn--primary">Bắt đầu quét</button>
+            </div>
 
-    <form action="{{ url_for('scan') }}" method="post" class="scan-form">
-        <label for="single_url" class="scan-form__label">URL cần quét</label>
-        <div class="scan-form__row">
-            <input
-                type="text"
-                id="single_url"
-                name="url"
-                class="scan-form__input"
-                placeholder="Ví dụ: https://example.com"
-                value="{{ previous_url or '' }}"
-                required
-                autofocus
-            >
-            <button type="submit" class="btn btn--primary">Quét website</button>
-        </div>
+            <div class="scan-status" role="status" aria-live="polite" hidden>
+                <span class="scan-status__spinner" aria-hidden="true"></span>
+                <span class="scan-status__text">Đang quét, vui lòng chờ...</span>
+            </div>
+        </form>
+    </div>
 
-        <div class="scan-status" role="status" aria-live="polite" hidden>
-            <span class="scan-status__spinner" aria-hidden="true"></span>
-            <span class="scan-status__text">Đang quét, vui lòng chờ...</span>
-        </div>
-    </form>
-
-    <h2 class="section-heading">So sánh hai website</h2>
-
+    <div class="form-section form-section--compare">
+    <h2 class="section-heading section-heading--form">So sánh hai website</h2>
     <form action="{{ url_for('compare') }}" method="post" class="scan-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <label for="url_a" class="scan-form__label">Website A</label>
         <div class="scan-form__row scan-form__row--stack-mobile">
             <input
@@ -68,16 +71,18 @@
             >
             <button type="submit" class="btn btn--primary">So sánh 2 website</button>
         </div>
+
         <div class="scan-status" role="status" aria-live="polite" hidden>
             <span class="scan-status__spinner" aria-hidden="true"></span>
             <span class="scan-status__text">Đang quét, vui lòng chờ...</span>
         </div>
     </form>
+    </div>
 
     <div class="module-grid">
         <div class="module-card">
             <div class="module-card__label">Header Check</div>
-            <p>Rà soát security header còn thiếu và rò rỉ thông tin server.</p>
+            <p>Phân tích security header, thuộc tính cookie, CORS và rò rỉ thông tin server.</p>
         </div>
         <div class="module-card">
             <div class="module-card__label">Directory Check</div>
@@ -95,57 +100,68 @@
             <div class="module-card__label">Port Scan</div>
             <p>Kiểm tra nhanh các cổng TCP phổ biến đang mở.</p>
         </div>
+        <div class="module-card">
+            <div class="module-card__label">TLS/SSL Check</div>
+            <p>Kiểm tra HTTPS, chứng chỉ, hostname và phiên TLS được thương lượng.</p>
+        </div>
     </div>
 </section>
 
 <script>
+    // Hiển thị trạng thái "Đang quét" và khoá nút để tránh gửi form nhiều lần.
+    // Form vẫn được gửi theo cách thông thường nên CSRF token và các mã lỗi
+    // 400/500 do server trả về vẫn hiển thị đúng.
     (() => {
-        document.querySelectorAll(".scan-form").forEach((form) => {
+        const forms = document.querySelectorAll(".scan-form");
+
+        const reset = (form) => {
             const button = form.querySelector("button[type='submit']");
             const status = form.querySelector(".scan-status");
+            form.dataset.submitting = "false";
+            if (button) {
+                button.disabled = false;
+                if (button.dataset.defaultText) {
+                    button.textContent = button.dataset.defaultText;
+                }
+            }
+            if (status) {
+                status.hidden = true;
+            }
+        };
 
+        forms.forEach((form) => {
+            const button = form.querySelector("button[type='submit']");
+            const status = form.querySelector(".scan-status");
             if (!button || !status) {
                 return;
             }
+            button.dataset.defaultText = button.textContent;
 
-            const defaultButtonText = button.textContent;
-
-            form.addEventListener("submit", async (event) => {
-                event.preventDefault();
-
+            form.addEventListener("submit", (event) => {
                 if (form.dataset.submitting === "true") {
+                    event.preventDefault();
                     return;
                 }
-
                 form.dataset.submitting = "true";
-                button.disabled = true;
+                // Khoá các form khác: một lượt quét tại một thời điểm.
+                forms.forEach((other) => {
+                    const otherButton = other.querySelector("button[type='submit']");
+                    if (other !== form && otherButton) {
+                        otherButton.disabled = true;
+                    }
+                });
                 button.textContent = "Đang quét...";
                 status.hidden = false;
-                status.classList.remove("scan-status--error");
-
-                try {
-                    const response = await fetch(form.action, {
-                        method: form.method || "POST",
-                        body: new FormData(form),
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
-                    }
-
-                    const html = await response.text();
-                    document.open();
-                    document.write(html);
-                    document.close();
-                } catch (error) {
-                    form.dataset.submitting = "false";
-                    button.disabled = false;
-                    button.textContent = defaultButtonText;
-                    status.classList.add("scan-status--error");
-                    status.querySelector(".scan-status__text").textContent =
-                        "Không thể hoàn tất quá trình quét. Vui lòng thử lại.";
-                }
+                // Vô hiệu hoá nút sau khi trình duyệt đã dựng xong dữ liệu form.
+                setTimeout(() => { button.disabled = true; }, 0);
             });
+        });
+
+        // Quay lại bằng nút Back (bfcache): trả giao diện về trạng thái ban đầu.
+        window.addEventListener("pageshow", (event) => {
+            if (event.persisted) {
+                forms.forEach(reset);
+            }
         });
     })();
 </script>
