@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Từ điển giải thích &middot; Lightweight Web Vulnerability Scanner{% endblock %}
+
+{% block content %}
+<section class="glossary">
+    <h1 class="scan-panel__heading">Từ điển giải thích</h1>
+    <p class="scan-panel__lead">
+        16 tiêu chí đánh giá chính, được gộp theo nguyên nhân để dễ theo dõi và thuyết trình.
+        Mức độ thực tế của mỗi finding vẫn phụ thuộc bằng chứng và ngữ cảnh quét.
+    </p>
+
+    <nav class="glossary__index" aria-label="Mục lục tiêu chí chính">
+        {% for key, entry in main_entries.items() %}
+        <a href="#{{ key }}">{{ entry.title }}</a>
+        {% endfor %}
+    </nav>
+
+    {% for key, entry in main_entries.items() %}
+    <article class="glossary__entry" id="{{ key }}">
+        <h2>{{ entry.title }} <span class="sev-tag sev-tag--{{ entry.severity|lower }}">{{ entry.severity }}</span></h2>
+        <section class="explain"><h4>Đây là gì?</h4><p>{{ entry.what }}</p></section>
+        <section class="explain"><h4>Vì sao nguy hiểm?</h4><p>{{ entry.why }}</p></section>
+        <section class="explain explain--fix"><h4>Cách khắc phục</h4><pre class="explain__fix">{{ entry.fix }}</pre></section>
+        {% if entry.learn_more %}
+        <p class="explain__links">Tìm hiểu thêm:
+            {% for link in entry.learn_more %}
+            <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>{% if not loop.last %} &middot; {% endif %}
+            {% endfor %}
+        </p>
+        {% endif %}
+    </article>
+    {% endfor %}
+
+    <details class="technical-reference glossary__references">
+        <summary>Thông tin kỹ thuật tham khảo ({{ reference_entries|length }} nhóm)</summary>
+        <p class="legend">Các mục này không phải tiêu chí chấm điểm chính và chỉ xuất hiện để giải thích dữ liệu kỹ thuật còn lại.</p>
+        {% for key, entry in reference_entries.items() %}
+        <article class="glossary__entry" id="{{ key }}">
+            <h2>{{ entry.title }} <span class="sev-tag sev-tag--info">Info</span></h2>
+            <section class="explain"><h4>Đây là gì?</h4><p>{{ entry.what }}</p></section>
+            <details class="more">
+                <summary>Xem lưu ý và cách xử lý</summary>
+                <section class="explain"><h4>Vì sao cần lưu ý?</h4><p>{{ entry.why }}</p></section>
+                <section class="explain explain--fix"><h4>Cách xử lý</h4><pre class="explain__fix">{{ entry.fix }}</pre></section>
+            </details>
+        </article>
+        {% endfor %}
+    </details>
+
+    <a href="{{ url_for('index') }}" class="btn btn--ghost back-link">Về trang quét</a>
+</section>
+{% endblock %}

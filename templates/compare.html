@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_findings.html" import summary_block, score_meter, findings_panel, reference_panel %}
+
+{% block content %}
+<section class="comparison">
+    <div class="comparison__head">
+        <h1 class="scan-panel__heading">So sánh kết quả quét</h1>
+        <p class="scan-panel__lead">
+            Hai website được quét tuần tự bằng cùng một bộ kiểm tra. Score cao hơn thể hiện
+            nhiều phát hiện có mức độ nghiêm trọng hơn.
+        </p>
+    </div>
+
+    <div class="comparison-grid">
+        {% for entry in comparison_results %}
+        <article class="comparison-card">
+            {% if entry.report %}
+            {% set report = entry.report %}
+            <div class="report__head">
+                <div>
+                    <div class="report__target-label">Website {{ entry.label }}</div>
+                    <div class="report__target">{{ report.target }}</div>
+                    <div class="report__meta">
+                        Quét lúc {{ report.scanned_at }} &middot;
+                        hoàn thành trong {{ report.scan_duration_sec }}s
+                    </div>
+                    <div class="report__meta">
+                        {{ "Hoàn tất" if report.scan_complete else "Chưa hoàn tất" }}
+                        &middot; {{ report.completed_module_count }}/{{ report.module_count }} module
+                    </div>
+                </div>
+                <div class="risk-badge risk-badge--{{ report.risk_level|lower }}">
+                    <div class="risk-badge__score">{{ report.risk_score }}</div>
+                    <div class="risk-badge__level">{{ report.risk_level }}</div>
+                </div>
+            </div>
+
+            {{ summary_block(report, entry.label|lower ~ "-") }}
+
+            {{ score_meter(report) }}
+
+            <div class="stat-row">
+                {% for severity, label in [("High", "Nghiêm trọng"), ("Medium", "Nên sửa"), ("Low", "Cải thiện thêm"), ("Info", "Chỉ để biết")] %}
+                <div class="stat-tile stat-tile--{{ severity|lower }}">
+                    <div class="stat-tile__count">{{ report.summary_count[severity] }}</div>
+                    <div class="stat-tile__label">{{ label }} <small>{{ severity }}</small></div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <h2 class="section-heading">Vấn đề chính ({{ report.findings|length }})</h2>
+            {{ findings_panel(report, entry.label|lower ~ "-") }}
+
+            <details class="technical-reference">
+                <summary>Thông tin kỹ thuật tham khảo ({{ report.reference_count }})</summary>
+                {{ reference_panel(report.reference_findings, entry.label|lower ~ "-") }}
+            {% set tls = report.raw_module_results.get('tls_checker', {}) %}
+            {% set cert = tls.get('certificate', {}) %}
+            {% set cipher = tls.get('cipher', {}) %}
+            <div class="tls-summary">
+                <div class="detail-card__title">TLS/SSL</div>
+                {% if tls %}
+                <ul class="mono-list">
+                    <li>HTTPS: {{ "Có" if tls.https_supported == true else ("Không" if tls.https_supported == false else "Chưa kết luận") }}</li>
+                    <li>Chứng chỉ: {{ "Hợp lệ" if cert.valid == true else ("Không hợp lệ" if cert.valid == false else "Chưa kết luận") }}</li>
+                    <li>Phiên: {{ tls.protocol or "Không có dữ liệu" }} / {{ cipher.name or "Không có dữ liệu" }}</li>
+                </ul>
+                {% if tls.error %}<p class="muted">{{ tls.error }}</p>{% endif %}
+                {% else %}<p class="muted">Không có dữ liệu TLS/SSL.</p>{% endif %}
+            </div>
+            </details>
+            {% else %}
+            <div class="report__target-label">Website {{ entry.label }}</div>
+            <div class="report__target">{{ entry.url }}</div>
+            <div class="alert alert--error comparison-card__error">
+                <span class="alert__icon">!</span>
+                <span>{{ entry.error }}</span>
+            </div>
+            {% endif %}
+        </article>
+        {% endfor %}
+    </div>
+
+    <a href="{{ url_for('index') }}" class="btn btn--ghost back-link">So sánh URL khác</a>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='report.js') }}" defer></script>
+{% endblock %}

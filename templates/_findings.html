@@ -1,0 +1,158 @@
+{#
+  Thành phần dùng chung cho result.html và compare.html.
+  Mọi giá trị đều được Jinja tự động escape; KHÔNG dùng |safe với dữ liệu từ website bị quét.
+#}
+
+{% set SEVERITY_GROUPS = [
+    ("High", "Nghiêm trọng", "Nên xử lý ngay"),
+    ("Medium", "Nên sửa", "Nên sửa trong thời gian tới"),
+    ("Low", "Cải thiện thêm", "Làm khi có thời gian"),
+    ("Info", "Chỉ để biết", "Thông tin tham khảo, chưa phải lỗi"),
+] %}
+
+{% macro summary_block(report, prefix="") %}
+<div class="summary {{ '' if report.scan_complete else 'summary--incomplete' }}">
+    <p class="summary__text">{{ report.summary_text }}</p>
+    {% if report.top_actions %}
+    <h2 class="summary__heading">{{ report.top_actions|length }} việc nên làm đầu tiên</h2>
+    <ol class="top-actions">
+        {% for action in report.top_actions %}
+        <li class="top-action top-action--{{ action.severity|lower }}">
+            <div class="top-action__title">
+                <span class="sev-tag sev-tag--{{ action.severity|lower }}">{{ action.severity }}</span>
+                {{ action.title }}
+            </div>
+            <div class="top-action__what">{{ action.what }}</div>
+            <a class="top-action__jump" href="#{{ prefix }}{{ action.finding_id }}" data-jump="{{ prefix }}{{ action.finding_id }}">Xem cách khắc phục &rarr;</a>
+        </li>
+        {% endfor %}
+    </ol>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro score_meter(report) %}
+<div class="meter" role="img" aria-label="Điểm rủi ro {{ report.risk_score }} trên 100">
+    <div class="meter__bar">
+        <span class="meter__zone meter__zone--low"></span>
+        <span class="meter__zone meter__zone--medium"></span>
+        <span class="meter__zone meter__zone--high"></span>
+        <span class="meter__marker" style="left: {{ report.risk_score|int }}%"></span>
+    </div>
+    <div class="meter__scale">
+        <span>0 &ndash; 24<br>Thấp</span>
+        <span>25 &ndash; 59<br>Trung bình</span>
+        <span>60 &ndash; 100<br>Cao</span>
+    </div>
+    <p class="meter__note">
+        Điểm càng cao càng nhiều vấn đề. Điểm 0 không đồng nghĩa với an toàn tuyệt đối.
+    </p>
+    <details class="more">
+        <summary>Điểm được tính như thế nào?</summary>
+        <p>{{ report.risk_explanation }}</p>
+    </details>
+</div>
+{% endmacro %}
+
+{% macro verification_legend() %}
+<p class="legend">
+    <strong>Đã xác nhận (có bằng chứng):</strong> công cụ tận mắt thấy dấu hiệu này.
+    <strong>Cần kiểm tra thêm:</strong> chỉ có dấu hiệu gián tiếp, bạn nên tự xem lại trước khi kết luận.
+</p>
+{% endmacro %}
+
+{% macro finding_item(finding, prefix="") %}
+{% set info = finding.explain %}
+<details class="finding finding--{{ finding.severity|lower }}" id="{{ prefix }}{{ finding.id }}"
+         data-severity="{{ finding.severity|lower }}"
+         data-search="{{ (finding.title ~ ' ' ~ finding.module ~ ' ' ~ info.what)|lower }}">
+    <summary class="finding__summary">
+        <span class="finding__top">
+            <span class="finding__severity">{{ finding.severity }}</span>
+            <span class="finding__module">{{ finding.module }}</span>
+            <span class="finding__verification finding__verification--{{ finding.verification }}">{{ "Đã xác nhận (có bằng chứng)" if finding.verification == "verified" else "Cần kiểm tra thêm" }}</span>
+        </span>
+        <span class="finding__title">{{ finding.title }}</span>
+        <span class="finding__what">{{ info.what }}</span>
+    </summary>
+
+    <div class="finding__body">
+        <section class="explain explain--what"><h4>Đây là gì?</h4><p>{{ info.what }}</p></section>
+        <section class="explain explain--why"><h4>Vì sao nguy hiểm?</h4><p>{{ info.why }}</p></section>
+        <section class="explain explain--fix"><h4>Cách khắc phục</h4><pre class="explain__fix">{{ info.fix }}</pre></section>
+        {% if not info.generic %}
+        <p class="explain__links"><a href="{{ url_for('glossary') }}#{{ info.key }}">Xem mục này trong từ điển &rarr;</a></p>
+        {% endif %}
+        {% if info.learn_more %}
+        <p class="explain__links">Tìm hiểu thêm:
+            {% for link in info.learn_more %}
+            <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>{% if not loop.last %} &middot; {% endif %}
+            {% endfor %}
+        </p>
+        {% endif %}
+
+        <details class="more">
+            <summary>Chi tiết kỹ thuật</summary>
+            {% if finding.description %}<div class="finding__detail"><strong>Mô tả:</strong> {{ finding.description }}</div>{% endif %}
+            {% if finding.evidence %}<div class="finding__detail"><strong>Bằng chứng:</strong> {{ finding.evidence }}</div>{% endif %}
+            {% if finding.cause %}<div class="finding__detail"><strong>Nguyên nhân:</strong> {{ finding.cause }}</div>{% endif %}
+            {% if finding.recommendation %}<div class="finding__detail"><strong>Khuyến nghị của công cụ:</strong> {{ finding.recommendation }}</div>{% endif %}
+        </details>
+    </div>
+</details>
+{% endmacro %}
+
+{% macro findings_panel(report, prefix="") %}
+<div class="findings-panel" data-findings-panel>
+    {% if report.findings %}
+    <div class="filters" data-filters hidden>
+        <div class="filters__buttons" role="group" aria-label="Lọc theo mức độ">
+            <button type="button" class="chip is-active" data-filter="all">Tất cả ({{ report.findings|length }})</button>
+            {% for key, label, _hint in SEVERITY_GROUPS %}
+            {% if report.summary_count[key] %}
+            <button type="button" class="chip chip--{{ key|lower }}" data-filter="{{ key|lower }}">{{ label }} ({{ report.summary_count[key] }})</button>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <input type="search" class="filters__search" data-search-input placeholder="Tìm trong kết quả..." aria-label="Tìm trong kết quả">
+    </div>
+    {{ verification_legend() }}
+
+    {% for key, label, hint in SEVERITY_GROUPS %}
+    {% set items = report.findings|selectattr("severity", "equalto", key)|list %}
+    {% if items %}
+    <section class="group group--{{ key|lower }}" data-group="{{ key|lower }}">
+        <h3 class="group__title">{{ label }} <span class="group__tag">{{ key }}</span>
+            <span class="group__hint">&middot; {{ hint }}</span></h3>
+        <div class="finding-list">
+            {% for finding in items %}
+            {{ finding_item(finding, prefix) }}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+    {% endfor %}
+    <p class="empty-note" data-no-match hidden>Không có kết quả nào khớp bộ lọc hoặc từ khóa.</p>
+    {% else %}
+    <p class="empty-note">
+        {{ "Không phát hiện vấn đề nào với các kiểm tra đã hoàn thành." if report.scan_complete else "Không đủ dữ liệu để kết luận vì một số kiểm tra chưa hoàn thành." }}
+    </p>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro reference_panel(findings, prefix="") %}
+{% if findings %}
+<p class="legend">
+    Các mục dưới đây là quan sát kỹ thuật hoặc kết quả chưa đủ ngữ cảnh để kết luận lỗ hổng.
+    Chúng không làm tăng điểm rủi ro.
+</p>
+<div class="finding-list">
+    {% for finding in findings %}
+    {{ finding_item(finding, prefix) }}
+    {% endfor %}
+</div>
+{% else %}
+<p class="empty-note">Không có quan sát tham khảo bổ sung.</p>
+{% endif %}
+{% endmacro %}
