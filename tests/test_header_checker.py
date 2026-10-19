@@ -130,7 +130,7 @@ def test_cors_reflection_uses_one_guarded_non_redirecting_probe():
     assert session.calls[0][1]["allow_redirects"] is False
     assert result["cors"]["origin_reflected"] is True
     finding = next(item for item in result["findings"] if "phản chiếu" in item["title"])
-    assert finding["severity"] == "High"
+    assert finding["severity"] == "Medium"
 
 
 def test_cors_wildcard_is_reported_without_extra_probe():

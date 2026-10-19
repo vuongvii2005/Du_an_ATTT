@@ -9,8 +9,32 @@ import knowledge
 
 SEVERITY_WEIGHT = {"High": 70, "Medium": 35, "Low": 10, "Info": 0}
 SEVERITY_ORDER = ["High", "Medium", "Low", "Info"]
-CONFIDENCE_MULTIPLIER = {"verified": 1.0, "suspected": 0.5}
+CONFIDENCE_MULTIPLIER = {"verified": 1.0, "suspected": 0.25}
 MAX_TOP_ACTIONS = 3
+EXPECTED_MODULES = (
+    "header_checker",
+    "tls_checker",
+    "dir_checker",
+    "robots_checker",
+    "cms_checker",
+    "port_checker",
+)
+MODULE_SCORE_CAP = 70
+SUSPECTED_SCORE_CAP = 10
+
+# Several display categories are produced by one checker. Keep their score cap
+# together so one response cannot look like many independent vulnerabilities.
+SCORE_GROUPS = {
+    "Header Check": "header_checker",
+    "Security Header": "header_checker",
+    "Cookie Check": "header_checker",
+    "CORS Check": "header_checker",
+    "TLS/SSL Check": "tls_checker",
+    "Directory Check": "dir_checker",
+    "Robots.txt Check": "robots_checker",
+    "CMS Detection": "cms_checker",
+    "Port Scan": "port_checker",
+}
 
 # Tên dễ hiểu và hậu quả khi module không chạy xong (dùng cho summary_text).
 MODULE_INFO = {
@@ -24,11 +48,15 @@ MODULE_INFO = {
 
 
 def _finding(module, title, item, description=None):
+    verification = item.get("verification", "suspected")
+    severity = item.get("severity", "Info")
+    if severity == "High" and verification != "verified":
+        severity = "Medium"
     finding = {
         "module": module,
         "title": title,
-        "severity": item.get("severity", "Info"),
-        "verification": item.get("verification", "suspected"),
+        "severity": severity,
+        "verification": verification,
         "confidence": item.get("confidence", "medium"),
         "description": description if description is not None else item.get("description", ""),
     }
@@ -38,12 +66,35 @@ def _finding(module, title, item, description=None):
     return finding
 
 
+def _observation(item):
+    """Turn a configuration hint into reference-only evidence."""
+    observation = dict(item)
+    observation.update(severity="Info", verification="suspected", confidence="low")
+    return observation
+
+
+def _is_reference_only(finding):
+    """Recognize legacy module output that is only a configuration hint."""
+    title = (finding.get("title") or "").lower()
+    return (
+        title.startswith("thiếu header:")
+        or title.startswith("cổng mở:")
+        or title.startswith("disallow nhạy cảm:")
+    )
+
+
 def _collect_findings(module_results):
     findings = []
 
     header_result = module_results.get("header_checker", {}) or {}
     for item in header_result.get("missing_headers", []):
-        findings.append(_finding("Header Check", f"Thiếu header: {item['header']}", item))
+        findings.append(
+            _finding(
+                "Header Check",
+                f"Thiếu header: {item['header']}",
+                _observation(item),
+            )
+        )
     for item in header_result.get("info_leak", []):
         findings.append(
             _finding(
@@ -68,7 +119,13 @@ def _collect_findings(module_results):
         )
 
     for item in (module_results.get("robots_checker", {}) or {}).get("sensitive_hints", []):
-        findings.append(_finding("Robots.txt Check", f"Disallow nhạy cảm: {item['path']}", item))
+        findings.append(
+            _finding(
+                "Robots.txt Check",
+                f"Disallow nhạy cảm: {item['path']}",
+                _observation(item),
+            )
+        )
 
     for item in (module_results.get("cms_checker", {}) or {}).get("detected", []):
         if item.get("cms") != "Unknown":
@@ -76,20 +133,41 @@ def _collect_findings(module_results):
 
     for item in (module_results.get("port_checker", {}) or {}).get("open_ports", []):
         findings.append(
-            _finding("Port Scan", f"Cổng mở: {item['port']} ({item['service']})", item)
+            _finding(
+                "Port Scan",
+                f"Cổng mở: {item['port']} ({item['service']})",
+                _observation(item),
+            )
         )
 
     for item in (module_results.get("tls_checker", {}) or {}).get("findings", []):
         findings.append(_finding("TLS/SSL Check", item.get("title", "TLS/SSL"), item))
 
-    # The same observation must not raise the score more than once.
+    # The same observation must not raise the score more than once. Prefer the
+    # strongest evidence when duplicate module output disagrees.
     unique = {}
     for finding in findings:
         key = (finding["module"], finding["title"])
         current = unique.get(key)
-        if current is None or SEVERITY_ORDER.index(finding["severity"]) < SEVERITY_ORDER.index(
-            current["severity"]
-        ):
+        candidate_rank = (
+            0 if finding.get("verification") == "verified" else 1,
+            SEVERITY_ORDER.index(finding["severity"])
+            if finding["severity"] in SEVERITY_ORDER
+            else len(SEVERITY_ORDER),
+            {"high": 0, "medium": 1, "low": 2}.get(finding.get("confidence"), 1),
+        )
+        current_rank = (
+            (
+                0 if current.get("verification") == "verified" else 1,
+                SEVERITY_ORDER.index(current["severity"])
+                if current["severity"] in SEVERITY_ORDER
+                else len(SEVERITY_ORDER),
+                {"high": 0, "medium": 1, "low": 2}.get(current.get("confidence"), 1),
+            )
+            if current
+            else None
+        )
+        if current is None or candidate_rank < current_rank:
             unique[key] = finding
     return list(unique.values())
 
@@ -133,7 +211,21 @@ def _build_summary_text(summary_count, incomplete_modules, action_count):
     serious = summary_count.get("High", 0)
     should_fix = summary_count.get("Medium", 0)
     parts = []
-    if serious or should_fix:
+    if incomplete_modules:
+        found = []
+        if serious:
+            found.append(f"{serious} vấn đề nghiêm trọng")
+        if should_fix:
+            found.append(f"{should_fix} vấn đề nên sửa")
+        if found:
+            parts.append(
+                "Các module đã hoàn thành ghi nhận "
+                + " và ".join(found)
+                + "; đây chưa phải kết luận về toàn bộ website."
+            )
+        else:
+            parts.append("Chưa ghi nhận vấn đề nghiêm trọng trong các module đã hoàn thành.")
+    elif serious or should_fix:
         found = []
         if serious:
             found.append(f"{serious} vấn đề nghiêm trọng")
@@ -143,8 +235,6 @@ def _build_summary_text(summary_count, incomplete_modules, action_count):
         if action_count:
             sentence += f" Hãy xử lý {action_count} việc dưới đây trước."
         parts.append(sentence)
-    elif incomplete_modules:
-        parts.append("Chưa phát hiện vấn đề nghiêm trọng trong các phần đã kiểm tra xong.")
     else:
         parts.append(
             "Không phát hiện vấn đề nghiêm trọng trong các kiểm tra đã chạy. "
@@ -167,34 +257,53 @@ def _build_summary_text(summary_count, incomplete_modules, action_count):
 
 
 def _calculate_risk_score(findings, incomplete_modules=None):
-    module_scores = defaultdict(float)
+    confirmed_scores = defaultdict(float)
+    suspected_scores = defaultdict(float)
+    seen = set()
     for finding in findings:
+        key = (finding.get("module", "Unknown"), finding.get("title", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        if _is_reference_only(finding):
+            continue
         weight = SEVERITY_WEIGHT.get(finding.get("severity"), 0)
         multiplier = CONFIDENCE_MULTIPLIER.get(finding.get("verification"), 0.5)
-        module_scores[finding.get("module", "Unknown")] += weight * multiplier
+        group = SCORE_GROUPS.get(finding.get("module"), finding.get("module", "Unknown"))
+        if finding.get("verification") == "verified":
+            confirmed_scores[group] += weight * multiplier
+        else:
+            suspected_scores[group] += weight * multiplier
 
     # Repeated observations from one checker cannot dominate the whole report.
-    score = min(100, round(sum(min(value, 85) for value in module_scores.values())))
-    if score >= 60:
+    confirmed_total = sum(min(value, MODULE_SCORE_CAP) for value in confirmed_scores.values())
+    suspected_total = min(
+        SUSPECTED_SCORE_CAP,
+        sum(min(value, SUSPECTED_SCORE_CAP) for value in suspected_scores.values()),
+    )
+    score = min(100, round(confirmed_total + suspected_total))
+
+    if incomplete_modules:
+        level = "Unknown"
+    elif any(
+        not _is_reference_only(finding)
+        and finding.get("verification") == "verified"
+        and finding.get("severity") == "High"
+        for finding in findings
+    ):
+        # High is reserved for a high-severity finding with direct evidence.
         level = "High"
-    elif score >= 25:
+    elif any(
+        not _is_reference_only(finding)
+        and finding.get("verification") == "verified"
+        and finding.get("severity") == "Medium"
+        for finding in findings
+    ) or confirmed_total >= 25:
         level = "Medium"
     elif score > 0:
         level = "Low"
     else:
         level = "Info"
-
-    verified_levels = [
-        finding["severity"]
-        for finding in findings
-        if finding.get("verification") == "verified" and finding.get("severity") in SEVERITY_ORDER
-    ]
-    if verified_levels:
-        highest_verified = min(verified_levels, key=SEVERITY_ORDER.index)
-        if SEVERITY_ORDER.index(highest_verified) < SEVERITY_ORDER.index(level):
-            level = highest_verified
-    elif incomplete_modules and score == 0:
-        level = "Unknown"
 
     return {"score": score, "level": level}
 
@@ -209,7 +318,16 @@ def generate_report(target_url, module_results, scan_duration=None, requested_ta
 
     module_status = []
     incomplete_modules = []
-    for module_name, result in module_results.items():
+    module_names = list(EXPECTED_MODULES)
+    module_names.extend(name for name in module_results if name not in module_names)
+    for module_name in module_names:
+        result = module_results.get(module_name)
+        if result is None:
+            result = {
+                "status": "skipped",
+                "error": "Module chưa được chạy.",
+                "duration_sec": None,
+            }
         result = result or {}
         status = result.get("status", "error")
         item = {
@@ -232,8 +350,9 @@ def generate_report(target_url, module_results, scan_duration=None, requested_ta
         verification_count[verification] = verification_count.get(verification, 0) + 1
 
     explanation = (
-        "Điểm dùng trọng số High=70, Medium=35, Low=10; phát hiện nghi ngờ nhận 50% trọng số. "
-        "Mỗi module đóng góp tối đa 85 điểm và mức tổng không thấp hơn phát hiện đã xác minh nghiêm trọng nhất."
+        "Điểm dùng trọng số High=70, Medium=35, Low=10; phát hiện nghi ngờ chỉ nhận 25% trọng số "
+        "và tổng phần nghi ngờ bị giới hạn. Phát hiện cấu hình, cổng mở và dấu hiệu chưa đủ bằng chứng "
+        "được giữ ở mức tham khảo; mỗi module đóng góp tối đa 70 điểm."
     )
     if incomplete_modules:
         explanation += " Báo cáo chưa hoàn chỉnh vì có module lỗi hoặc bị bỏ qua."

@@ -74,4 +74,4 @@ def test_site_a_findings_are_removed_from_site_b_and_score_decreases():
     report_a = report.generate_report("http://localhost:5001", {"header_checker": result_a})
     report_b = report.generate_report("http://localhost:5002", {"header_checker": result_b})
     assert report_a["risk_score"] > report_b["risk_score"]
-    assert report_a["summary_count"]["High"] > report_b["summary_count"]["High"]
+    assert report_a["summary_count"]["Medium"] > report_b["summary_count"]["Medium"]

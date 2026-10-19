@@ -26,6 +26,51 @@ def test_incomplete_scan_without_findings_is_unknown_not_safe():
     assert risk == {"score": 0, "level": "Unknown"}
 
 
+def test_configuration_hints_and_open_ports_are_reference_only():
+    findings = report._collect_findings(
+        {
+            "header_checker": {
+                "missing_headers": [{"header": "Content-Security-Policy", "severity": "High", "verification": "verified"}]
+            },
+            "port_checker": {
+                "open_ports": [{"port": 3306, "service": "MySQL", "severity": "Medium", "verification": "verified"}]
+            },
+        }
+    )
+
+    assert all(item["severity"] == "Info" for item in findings)
+    assert all(item["verification"] == "suspected" for item in findings)
+    assert report._calculate_risk_score(findings) == {"score": 0, "level": "Info"}
+
+
+def test_unverified_findings_are_capped_and_cannot_become_high():
+    findings = [
+        {
+            "module": "CORS Check",
+            "title": f"Dấu hiệu {index}",
+            "severity": "High",
+            "verification": "suspected",
+        }
+        for index in range(20)
+    ]
+
+    risk = report._calculate_risk_score(findings)
+
+    assert risk["score"] == report.SUSPECTED_SCORE_CAP
+    assert risk["level"] == "Low"
+
+
+def test_missing_module_makes_report_incomplete_and_unknown():
+    result = report.generate_report(
+        "https://example.com",
+        {"header_checker": {"status": "success", "findings": []}},
+    )
+
+    assert result["scan_complete"] is False
+    assert result["risk_level"] == "Unknown"
+    assert any(item["module"] == "port_checker" for item in result["incomplete_modules"])
+
+
 def test_duplicate_finding_is_counted_once():
     item = {
         "header": "Content-Security-Policy",

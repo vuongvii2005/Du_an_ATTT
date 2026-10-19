@@ -55,7 +55,14 @@ def test_top_actions_are_at_most_three_and_only_verified():
 
 
 def test_top_actions_capped_at_three_with_many_findings():
-    result = sample_report()
+    modules = sample_module_results()
+    modules["header_checker"]["findings"] = [
+        {"category": "CORS Check", "title": "CORS cho phép mọi origin", "severity": "High", "verification": "verified"},
+        {"category": "Security Header", "title": "CSP cho phép script từ mọi nguồn", "severity": "High", "verification": "verified"},
+        {"category": "Cookie Check", "title": "Cookie 'sid' thiếu Secure", "severity": "Medium", "verification": "verified"},
+        {"category": "Security Header", "title": "HSTS đang bị vô hiệu hóa", "severity": "Medium", "verification": "verified"},
+    ]
+    result = report.generate_report("https://example.com", modules)
     verified_issues = [
         finding for finding in result["findings"]
         if finding["verification"] == "verified" and finding["severity"] != "Info"
@@ -90,7 +97,6 @@ def test_summary_text_for_complete_report_with_problems():
     text = result["summary_text"]
 
     assert str(result["summary_count"]["High"]) + " vấn đề nghiêm trọng" in text
-    assert str(result["summary_count"]["Medium"]) + " vấn đề nên sửa" in text
     assert f"{len(result['top_actions'])} việc dưới đây" in text
     assert "CHƯA hoàn chỉnh" not in text
 

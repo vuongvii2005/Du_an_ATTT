@@ -16,27 +16,27 @@ import requests
 # Danh sách các security header quan trọng cần có trên 1 website an toàn
 SECURITY_HEADERS = {
     "Strict-Transport-Security": {
-        "severity": "Medium",
+        "severity": "Info",
         "description": "Thiếu HSTS - trình duyệt có thể bị hạ cấp từ HTTPS về HTTP (downgrade attack).",
     },
     "X-Content-Type-Options": {
-        "severity": "Low",
+        "severity": "Info",
         "description": "Thiếu X-Content-Type-Options - trình duyệt có thể bị lợi dụng MIME-sniffing.",
     },
     "X-Frame-Options": {
-        "severity": "Medium",
+        "severity": "Info",
         "description": "Thiếu X-Frame-Options - website có thể bị nhúng vào iframe (Clickjacking).",
     },
     "Content-Security-Policy": {
-        "severity": "High",
+        "severity": "Info",
         "description": "Thiếu Content-Security-Policy - tăng nguy cơ bị khai thác XSS và Data Injection.",
     },
     "Referrer-Policy": {
-        "severity": "Low",
+        "severity": "Info",
         "description": "Thiếu Referrer-Policy - URL hiện tại có thể bị rò rỉ qua header Referer khi chuyển trang.",
     },
     "Permissions-Policy": {
-        "severity": "Low",
+        "severity": "Info",
         "description": "Thiếu Permissions-Policy - không kiểm soát quyền truy cập API trình duyệt (camera, mic, vị trí...).",
     },
 }
@@ -47,7 +47,7 @@ PROBE_ORIGIN = "https://cors-probe.invalid"
 
 
 def _finding(category, title, severity, description, evidence, cause, recommendation,
-             verification="verified", confidence="high"):
+             verification="suspected", confidence="medium"):
     return {
         "category": category,
         "title": title,
@@ -83,7 +83,7 @@ def _analyze_security_header_values(headers, response_url):
         script_sources = directives.get("script-src", directives.get("default-src"))
         if not csp.strip() or script_sources is None:
             findings.append(_finding(
-                "Security Header", "CSP không bảo vệ nguồn script", "High",
+                "Security Header", "CSP không bảo vệ nguồn script", "Low",
                 "CSP tồn tại nhưng không có chính sách hiệu lực để giới hạn nguồn JavaScript.",
                 "Content-Security-Policy: {}".format(csp or "<rỗng>"),
                 "Header CSP rỗng hoặc thiếu cả script-src và default-src.",
@@ -112,7 +112,7 @@ def _analyze_security_header_values(headers, response_url):
                 ))
             if "*" in script_sources:
                 findings.append(_finding(
-                    "Security Header", "CSP cho phép script từ mọi nguồn", "High",
+                    "Security Header", "CSP cho phép script từ mọi nguồn", "Medium",
                     "Allowlist script chứa wildcard nên không giới hạn nguồn tải mã.",
                     "Nguồn script hiệu lực: {}".format(" ".join(script_sources)),
                     "script-src/default-src sử dụng wildcard '*'.",
@@ -126,7 +126,7 @@ def _analyze_security_header_values(headers, response_url):
         )
         if not match:
             findings.append(_finding(
-                "Security Header", "HSTS có max-age không hợp lệ", "High",
+                "Security Header", "HSTS có max-age không hợp lệ", "Medium",
                 "Trình duyệt không thể áp dụng HSTS nếu thiếu max-age hợp lệ.",
                 "Strict-Transport-Security: {}".format(hsts or "<rỗng>"),
                 "Directive max-age bị thiếu, âm hoặc không phải số nguyên.",
@@ -136,7 +136,7 @@ def _analyze_security_header_values(headers, response_url):
             max_age = int(match.group(1) or match.group(2))
             if max_age == 0:
                 findings.append(_finding(
-                    "Security Header", "HSTS đang bị vô hiệu hóa", "High",
+                    "Security Header", "HSTS đang bị vô hiệu hóa", "Medium",
                     "max-age=0 yêu cầu trình duyệt xóa chính sách HSTS đã lưu.",
                     "Strict-Transport-Security: {}".format(hsts),
                     "Cấu hình HSTS đặt thời gian hiệu lực bằng 0.",
@@ -455,7 +455,7 @@ def _analyze_cors(response, session=None, target_url=None, deadline=None):
             credentialed = probe_credentials == "true"
             findings.append(_finding(
                 "CORS Check", "CORS phản chiếu origin không tin cậy",
-                "High" if credentialed else "Medium",
+                "Medium",
                 "Server phản chiếu Origin do scanner cung cấp{}.".format(
                     " và cho phép credentials" if credentialed else ""
                 ),
@@ -464,6 +464,7 @@ def _analyze_cors(response, session=None, target_url=None, deadline=None):
                 ),
                 "Server trả lại Origin mà không đối chiếu allowlist chặt chẽ.",
                 "Dùng allowlist origin chính xác, thêm Vary: Origin và chỉ bật credentials khi cần.",
+                verification="verified", confidence="high",
             ))
         return cors, findings, None
     except (requests.RequestException, TimeoutError) as exc:
@@ -511,8 +512,8 @@ def run(response, session=None, target_url=None, deadline=None):
                 {
                     "header": header_name,
                     "severity": meta["severity"],
-                    "verification": "verified",
-                    "confidence": "high",
+                    "verification": "suspected",
+                    "confidence": "low",
                     "description": meta["description"],
                 }
             )

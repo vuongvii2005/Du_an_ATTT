@@ -51,7 +51,7 @@ def run(base_url, session=None, deadline=None):
                                 {
                                     "path": path,
                                     "keyword": kw,
-                                    "severity": "Low",
+                                    "severity": "Info",
                                     "verification": "suspected",
                                     "confidence": "medium",
                                     "description": f"Disallow path chứa từ khoá nhạy cảm '{kw}' - có thể gợi ý khu vực quan trọng của site.",

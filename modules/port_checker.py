@@ -72,15 +72,14 @@ def run(hostname, resolved_ip=None, deadline=None):
             destination = (resolved_ip, port, 0, 0) if family == socket.AF_INET6 else (resolved_ip, port)
             code = sock.connect_ex(destination)
             if code == 0:
-                # Các dịch vụ quản trị/nhạy cảm nếu mở public thì mức rủi ro cao hơn
-                severity = "Medium" if port in (21, 23, 3306, 3389) else "Info"
+                # A TCP handshake identifies exposure, not an exploitable service.
                 result["open_ports"].append(
                     {
                         "port": port,
                         "service": service,
-                        "severity": severity,
-                        "verification": "verified",
-                        "confidence": "high",
+                        "severity": "Info",
+                        "verification": "suspected",
+                        "confidence": "low",
                         "description": f"Cổng {port} ({service}) đang mở và có thể kết nối được.",
                     }
                 )

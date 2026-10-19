@@ -241,12 +241,13 @@ handshake được đánh dấu là lượt kiểm tra chưa hoàn thành, khôn
 ## Cách chấm điểm
 
 - High: 70 điểm; Medium: 35; Low: 10; Info: 0.
-- Finding nghi ngờ nhận 50% trọng số.
+- Finding nghi ngờ nhận 25% trọng số và tổng phần nghi ngờ bị giới hạn 10 điểm.
 - Finding trùng `module + title` chỉ được tính một lần.
-- Mỗi module đóng góp tối đa 85 điểm để một nhóm kết quả lặp không lấn át báo cáo.
-- Risk level không bao giờ thấp hơn finding đã xác minh nghiêm trọng nhất.
-- Nếu không có finding nhưng có module lỗi/bị bỏ qua, kết quả là `Unknown`,
-  không phải “an toàn”.
+- Các nhóm hiển thị thuộc cùng một module dùng chung mức trần 70 điểm.
+- Mức `High` chỉ dành cho finding High đã xác minh; thiếu header, cổng mở và dấu hiệu
+  chưa đủ bằng chứng chỉ là thông tin tham khảo.
+- Nếu thiếu module, module lỗi hoặc bị bỏ qua, risk level là `Unknown`, không phải
+  kết luận “an toàn” hay “nguy hiểm”.
 
 ## Giới hạn còn lại
 
