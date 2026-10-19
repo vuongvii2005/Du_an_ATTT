@@ -415,8 +415,8 @@ ENTRIES = {
     # ---------------------------------------------------------------- TLS / HTTPS
     "tls_no_https": _entry(
         "Website không hỗ trợ HTTPS",
-        "HTTPS là phiên bản có mã hóa của HTTP (biểu tượng ổ khóa trên trình duyệt). Website này không trả lời trên cổng HTTPS.",
-        "Mọi dữ liệu giữa người dùng và website (mật khẩu, thông tin cá nhân) đi dạng chữ thường, ai trên đường truyền cũng đọc và sửa được. Trình duyệt cũng sẽ cảnh báo \"Không an toàn\".",
+        "HTTPS là phiên bản có mã hóa của HTTP (biểu tượng ổ khóa trên trình duyệt). Trong phạm vi kiểm tra, website không trả lời trên các cổng HTTPS đã thử.",
+        "Kết quả này chỉ cho thấy chưa phát hiện HTTPS trên các cổng đã kiểm tra; không đủ để khẳng định mọi endpoint hoặc mọi dữ liệu truyền đi đều không được mã hóa.",
         "Cài chứng chỉ miễn phí của Let's Encrypt rồi bật HTTPS:\n"
         "sudo certbot --nginx -d vidu.com -d www.vidu.com   (hoặc --apache)\n"
         "Sau đó chuyển hướng HTTP sang HTTPS.",

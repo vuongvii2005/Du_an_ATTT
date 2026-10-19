@@ -75,3 +75,19 @@ def test_site_a_findings_are_removed_from_site_b_and_score_decreases():
     report_b = report.generate_report("http://localhost:5002", {"header_checker": result_b})
     assert report_a["risk_score"] > report_b["risk_score"]
     assert report_a["summary_count"]["Medium"] > report_b["summary_count"]["Medium"]
+
+
+def test_demo_sites_expose_different_directory_and_robots_fixtures():
+    client_a = site_a.test_client()
+    client_b = site_b.test_client()
+
+    exposed = client_a.get("/.env")
+    hidden = client_b.get("/.env")
+    assert exposed.status_code == 200
+    assert b"APP_KEY=dummy-site-a-key" in exposed.data
+    assert hidden.status_code == 404
+
+    assert client_a.get("/admin/").status_code == 302
+    assert client_b.get("/admin/").status_code == 403
+    assert b"/backup.sql" in client_a.get("/robots.txt").data
+    assert b"/backup.sql" not in client_b.get("/robots.txt").data

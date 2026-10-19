@@ -131,6 +131,7 @@ def run_scan(raw_url, guard=None, session=None):
             initial_target = guard.validate_url(raw_url)
         except TargetGuardError as exc:
             raise ScannerError(str(exc)) from exc
+        tls_initial_target = initial_target
 
         total_timeout = _env_int("SCANNER_TOTAL_TIMEOUT", 45, minimum=10, maximum=180)
         deadline = started + total_timeout
@@ -186,6 +187,7 @@ def run_scan(raw_url, guard=None, session=None):
                     session=session,
                     homepage_response=homepage_response,
                     deadline=deadline,
+                    initial_target=tls_initial_target,
                 ),
                 deadline,
             ),

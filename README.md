@@ -221,9 +221,9 @@ Remove-Item Env:SCANNER_DEMO_MODE, Env:SCANNER_DEMO_CONFIRM, Env:SCANNER_DEMO_TA
 
 Directory checker dùng tối đa 14 HTTP request gồm một baseline soft-404. Port
 checker dùng timeout 0,5 giây mỗi cổng và tôn trọng deadline chung. TLS checker
-dùng tối đa một TLS connection tới IP đã pin và một HTTP request không theo
-redirect để kiểm tra chuyển hướng; timeout TLS tối đa 4 giây và vẫn tôn trọng
-deadline/request budget chung.
+kiểm tra các endpoint HTTPS trong URL ban đầu và cổng 443 mặc định phù hợp, cùng
+một HTTP request không theo redirect để kiểm tra chuyển hướng; timeout TLS tối đa
+4 giây và vẫn tôn trọng deadline/request budget chung.
 
 ## TLS/SSL Security Analyzer
 

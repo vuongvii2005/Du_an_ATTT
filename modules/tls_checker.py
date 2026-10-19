@@ -24,6 +24,8 @@ def _base_result():
         "error": None,
         "duration_sec": 0.0,
         "https_supported": None,
+        "https_status": "unverified",
+        "https_checks": [],
         "tls_port": None,
         "certificate": {},
         "protocol": None,
@@ -289,37 +291,74 @@ def _verification_finding(exc):
     )
 
 
-def run(target, session=None, homepage_response=None, deadline=None, now=None):
-    """Inspect one negotiated TLS session without enumerating protocols or ciphers."""
-    started = time.monotonic()
-    result = _base_result()
-    result["tls_port"] = target.port if target.scheme == "https" else 443
-    check_time = now or datetime.now(timezone.utc)
+def _https_endpoints(target, initial_target=None):
+    """Build the bounded HTTPS scope from the original and effective target."""
+    endpoints = []
+    seen = set()
+    for candidate in (initial_target, target):
+        if candidate is None:
+            continue
+        ports = [candidate.port] if candidate.scheme == "https" else [443]
+        if candidate.scheme == "https" and candidate.port != 443:
+            ports.append(443)
+        for port in ports:
+            key = (candidate.selected_ip, candidate.hostname, port)
+            if key in seen:
+                continue
+            seen.add(key)
+            host = candidate.hostname
+            if ":" in host and not host.startswith("["):
+                host = "[{}]".format(host)
+            url = "https://{}".format(host)
+            if port != 443:
+                url += ":{}".format(port)
+            endpoints.append({
+                "ip": candidate.selected_ip,
+                "hostname": candidate.hostname,
+                "port": port,
+                "url": url,
+            })
+    return endpoints
+
+
+def _probe_https_endpoint(endpoint, check_time, deadline):
+    check = {
+        "url": endpoint["url"],
+        "ip": endpoint["ip"],
+        "port": endpoint["port"],
+        "status": "unverified",
+        "error": None,
+    }
+    details = {
+        "certificate": {},
+        "protocol": None,
+        "cipher": {},
+        "finding": None,
+        "negotiated": False,
+    }
 
     try:
         timeout = _remaining_timeout(deadline)
         context = ssl.create_default_context()
-        with socket.create_connection(
-            (target.selected_ip, result["tls_port"]), timeout=timeout
-        ) as raw_socket:
+        with socket.create_connection((endpoint["ip"], endpoint["port"]), timeout=timeout) as raw_socket:
             with context.wrap_socket(
-                raw_socket, server_hostname=target.hostname
+                raw_socket, server_hostname=endpoint["hostname"]
             ) as tls_socket:
                 certificate = tls_socket.getpeercert()
                 cipher = tls_socket.cipher() or (None, None, None)
-                result["https_supported"] = True
-                result["certificate"] = _certificate_details(certificate, check_time)
-                result["protocol"] = tls_socket.version()
-                result["cipher"] = {
+                details["certificate"] = _certificate_details(certificate, check_time)
+                details["protocol"] = tls_socket.version()
+                details["cipher"] = {
                     "name": cipher[0],
                     "protocol": cipher[1],
                     "bits": cipher[2],
                 }
-                _add_certificate_findings(result)
-                _add_negotiation_findings(result)
+                details["negotiated"] = True
+                check["status"] = "active"
     except ssl.SSLCertVerificationError as exc:
-        result["https_supported"] = True
-        result["certificate"] = {
+        check["status"] = "active"
+        check["error"] = str(exc)[:240]
+        details["certificate"] = {
             "valid": False,
             "hostname_matches": False if (
                 getattr(exc, "verify_code", None) == 62
@@ -328,24 +367,17 @@ def run(target, session=None, homepage_response=None, deadline=None, now=None):
             ) else None,
             "validation_error": str(exc)[:240],
         }
-        result["findings"].append(_verification_finding(exc))
-    except ConnectionRefusedError:
-        result["https_supported"] = False
-        result["findings"].append(_finding(
-            "Website không hỗ trợ HTTPS trên cổng kiểm tra",
-            "High",
-            "Kết nối TCP tới cổng HTTPS bị từ chối.",
-            "{}:{} từ chối kết nối.".format(target.selected_ip, result["tls_port"]),
-            "Dịch vụ HTTPS chưa chạy, không lắng nghe trên cổng này hoặc bị chặn chủ động.",
-            "Bật HTTPS với chứng chỉ hợp lệ và cấu hình chuyển hướng HTTP sang HTTPS.",
-        ))
+        details["finding"] = _verification_finding(exc)
+    except ConnectionRefusedError as exc:
+        check["status"] = "inactive"
+        check["error"] = str(exc)[:240] or "connection refused"
     except (socket.timeout, TimeoutError) as exc:
-        result["status"] = "error"
-        result["error"] = "Kiểm tra TLS hết thời gian: {}".format(str(exc) or "timeout")
+        check["status"] = "connection_failed"
+        check["error"] = "Kiểm tra TLS hết thời gian: {}".format(str(exc) or "timeout")
     except ssl.SSLError as exc:
-        result["status"] = "error"
-        result["error"] = "TLS handshake thất bại: {}".format(str(exc)[:240])
-        result["findings"].append(_finding(
+        check["status"] = "unverified"
+        check["error"] = str(exc)[:240]
+        details["finding"] = _finding(
             "TLS handshake thất bại",
             "Medium",
             "Không thể hoàn tất TLS handshake nên chưa thể xác nhận chứng chỉ và cấu hình phiên.",
@@ -354,10 +386,98 @@ def run(target, session=None, homepage_response=None, deadline=None, now=None):
             "Kiểm tra log máy chủ, chuỗi chứng chỉ, giao thức và cipher; quét lại sau khi khắc phục.",
             verification="suspected",
             confidence="medium",
-        ))
+        )
     except OSError as exc:
-        result["status"] = "error"
-        result["error"] = "Không thể kết nối dịch vụ TLS: {}".format(str(exc)[:240])
+        check["status"] = "connection_failed"
+        check["error"] = "Không thể kết nối dịch vụ TLS: {}".format(str(exc)[:240])
+
+    return check, details
+
+
+def _append_finding_once(result, finding):
+    if finding and not any(item.get("title") == finding.get("title") for item in result["findings"]):
+        result["findings"].append(finding)
+
+
+def _summarize_https_probes(result, checks, details):
+    statuses = [item["status"] for item in checks]
+    active = any(status == "active" for status in statuses)
+    all_inactive = bool(statuses) and all(status == "inactive" for status in statuses)
+    all_connection_failed = bool(statuses) and all(
+        status == "connection_failed" for status in statuses
+    )
+
+    result["https_checks"] = checks
+    if active:
+        result["https_supported"] = True
+        result["https_status"] = "active"
+        result["certificate"] = details["certificate"]
+        result["protocol"] = details["protocol"]
+        result["cipher"] = details["cipher"]
+        if details["negotiated"]:
+            _add_certificate_findings(result)
+            _add_negotiation_findings(result)
+        _append_finding_once(result, details["finding"])
+        if any(status in {"connection_failed", "unverified"} for status in statuses):
+            result["status"] = "error"
+            result["error"] = "Chưa hoàn tất mọi lần kiểm tra HTTPS; đã xác nhận ít nhất một endpoint hoạt động."
+        return
+
+    result["https_supported"] = False if all_inactive else None
+    if all_inactive:
+        result["https_status"] = "inactive"
+        ports = ", ".join(str(item["port"]) for item in checks)
+        result["findings"].append(_finding(
+            "Website không hỗ trợ HTTPS trên cổng kiểm tra",
+            "High",
+            "Không phát hiện dịch vụ HTTPS trên các cổng đã kiểm tra; kết luận này chỉ áp dụng trong phạm vi đó.",
+            "Các lần thử HTTPS trên cổng {} đều bị từ chối kết nối.".format(ports),
+            "Các cổng HTTPS mục tiêu trong phạm vi kiểm tra không nhận kết nối TCP.",
+            "Bật HTTPS với chứng chỉ hợp lệ và cấu hình chuyển hướng HTTP sang HTTPS.",
+        ))
+        return
+
+    result["status"] = "error"
+    if all_connection_failed:
+        result["https_status"] = "connection_failed"
+        result["error"] = next(
+            (item["error"] for item in checks if item.get("error")),
+            "Không thể kết nối dịch vụ TLS.",
+        )
+        return
+
+    result["https_status"] = "unverified"
+    result["error"] = "Chưa đủ bằng chứng xác minh HTTPS trong phạm vi kiểm tra."
+    _append_finding_once(result, details["finding"])
+
+
+def run(target, session=None, homepage_response=None, deadline=None, now=None,
+        initial_target=None):
+    """Inspect bounded HTTPS endpoints without treating one failed probe as proof."""
+    started = time.monotonic()
+    result = _base_result()
+    result["tls_port"] = target.port if target.scheme == "https" else 443
+    check_time = now or datetime.now(timezone.utc)
+
+    checks = []
+    first_active_details = None
+    first_failure_details = None
+    for endpoint in _https_endpoints(target, initial_target):
+        check, details = _probe_https_endpoint(endpoint, check_time, deadline)
+        checks.append(check)
+        if check["status"] == "active" and first_active_details is None:
+            first_active_details = details
+        if details["finding"] is not None and first_failure_details is None:
+            first_failure_details = details
+
+    _summarize_https_probes(
+        result,
+        checks,
+        first_active_details or first_failure_details or {
+            "certificate": {}, "protocol": None, "cipher": {}, "finding": None,
+            "negotiated": False,
+        },
+    )
 
     try:
         result["http_redirect"] = _check_http_redirect(

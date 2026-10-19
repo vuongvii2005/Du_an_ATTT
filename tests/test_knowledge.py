@@ -98,3 +98,14 @@ def test_all_entries_are_complete_and_links_are_https():
         for link in entry["learn_more"]:
             assert link["url"].startswith("https://"), key
             assert link["label"].strip(), key
+
+
+def test_no_https_explanation_is_scoped_to_checked_endpoints():
+    info = knowledge.explain({
+        "module": "TLS/SSL Check",
+        "title": "Website không hỗ trợ HTTPS trên cổng kiểm tra",
+        "severity": "High",
+    })
+
+    assert info["key"] == "tls_no_https"
+    assert "không đủ để khẳng định mọi endpoint" in info["why"]

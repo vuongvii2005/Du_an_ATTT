@@ -58,9 +58,10 @@ class FakeContext:
         return self.tls_socket
 
 
-def _target(scheme="https"):
+def _target(scheme="https", port=None):
     guard = TargetGuard(resolver=resolver_for(PUBLIC_IP))
-    return guard.validate_url("{}://example.com".format(scheme))
+    suffix = ":{}".format(port) if port is not None else ""
+    return guard.validate_url("{}://example.com{}".format(scheme, suffix))
 
 
 def _mock_handshake(monkeypatch, tls_socket):
@@ -141,19 +142,59 @@ def test_hostname_mismatch_is_high(monkeypatch):
     assert result["findings"][0]["severity"] == "High"
 
 
-def test_refused_https_is_verified_high(monkeypatch):
+def test_refused_https_is_verified_only_after_all_checked_ports_refuse(monkeypatch):
     def refuse(*_args, **_kwargs):
         raise ConnectionRefusedError("refused")
 
     monkeypatch.setattr(tls_checker.socket, "create_connection", refuse)
+    target = _target("https", 8443)
 
-    result = tls_checker.run(_target("http"), homepage_response=FakeResponse(
-        url="http://example.com/"
-    ))
+    result = tls_checker.run(target, initial_target=target)
 
     assert result["status"] == "success"
     assert result["https_supported"] is False
+    assert result["https_status"] == "inactive"
+    assert [item["port"] for item in result["https_checks"]] == [8443, 443]
     assert result["findings"][0]["severity"] == "High"
+
+
+def test_refused_custom_port_does_not_rule_out_https_on_default_port(monkeypatch):
+    calls = []
+    context = FakeContext(FakeTLSSocket())
+
+    def connect(address, timeout):
+        calls.append((address, timeout))
+        if address[1] == 8443:
+            raise ConnectionRefusedError("refused")
+        return FakeSocket()
+
+    monkeypatch.setattr(tls_checker.ssl, "create_default_context", lambda: context)
+    monkeypatch.setattr(tls_checker.socket, "create_connection", connect)
+    target = _target("https", 8443)
+
+    result = tls_checker.run(target, initial_target=target, now=NOW)
+
+    assert result["https_supported"] is True
+    assert result["https_status"] == "active"
+    assert [address[1] for address, _ in calls] == [8443, 443]
+    assert not any("không hỗ trợ HTTPS" in item["title"] for item in result["findings"])
+
+
+def test_mixed_refusal_and_timeout_is_unverified(monkeypatch):
+    def connect(address, _timeout):
+        if address[1] == 8443:
+            raise ConnectionRefusedError("refused")
+        raise socket.timeout("timed out")
+
+    monkeypatch.setattr(tls_checker.socket, "create_connection", connect)
+    target = _target("https", 8443)
+
+    result = tls_checker.run(target, initial_target=target)
+
+    assert result["status"] == "error"
+    assert result["https_supported"] is None
+    assert result["https_status"] == "unverified"
+    assert not any("không hỗ trợ HTTPS" in item["title"] for item in result["findings"])
 
 
 def test_tls_timeout_is_error_without_security_conclusion(monkeypatch):
@@ -166,6 +207,7 @@ def test_tls_timeout_is_error_without_security_conclusion(monkeypatch):
 
     assert result["status"] == "error"
     assert result["https_supported"] is None
+    assert result["https_status"] == "connection_failed"
     assert "thời gian" in result["error"]
     assert result["findings"] == []
 
@@ -184,6 +226,7 @@ def test_tls_handshake_failure_is_incomplete_suspected_finding(monkeypatch):
 
     assert result["status"] == "error"
     assert result["https_supported"] is None
+    assert result["https_status"] == "unverified"
     assert result["findings"][0]["title"] == "TLS handshake thất bại"
     assert result["findings"][0]["verification"] == "suspected"
 
