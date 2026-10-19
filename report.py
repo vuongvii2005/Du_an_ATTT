@@ -4,10 +4,23 @@
 from collections import defaultdict
 from datetime import datetime
 
+import knowledge
+
 
 SEVERITY_WEIGHT = {"High": 70, "Medium": 35, "Low": 10, "Info": 0}
 SEVERITY_ORDER = ["High", "Medium", "Low", "Info"]
 CONFIDENCE_MULTIPLIER = {"verified": 1.0, "suspected": 0.5}
+MAX_TOP_ACTIONS = 3
+
+# Tên dễ hiểu và hậu quả khi module không chạy xong (dùng cho summary_text).
+MODULE_INFO = {
+    "header_checker": ("kiểm tra header, cookie và CORS", "chưa biết các thiết lập bảo mật của trình duyệt có đủ hay không"),
+    "tls_checker": ("kiểm tra HTTPS/chứng chỉ", "chưa biết kết nối có được mã hóa đúng cách hay không"),
+    "dir_checker": ("kiểm tra tệp nhạy cảm", "chưa biết có tệp bí mật nào bị lộ hay không"),
+    "robots_checker": ("kiểm tra robots.txt", "chưa biết robots.txt có lộ khu vực nhạy cảm hay không"),
+    "cms_checker": ("nhận diện CMS", "chưa biết website dùng phần mềm dựng sẵn nào"),
+    "port_checker": ("kiểm tra cổng mạng", "chưa biết có cổng dịch vụ nguy hiểm nào đang mở hay không"),
+}
 
 
 def _finding(module, title, item, description=None):
@@ -81,6 +94,78 @@ def _collect_findings(module_results):
     return list(unique.values())
 
 
+def _attach_explanations(findings):
+    """Gắn id (để nhảy tới finding) và nội dung giải thích; không đổi trường cũ."""
+    for index, finding in enumerate(findings, start=1):
+        finding["id"] = f"finding-{index}"
+        finding["explain"] = knowledge.explain(finding)
+
+
+def _build_top_actions(findings):
+    """Tối đa 3 việc nên làm đầu tiên, chỉ lấy từ finding đã xác minh và nghiêm trọng nhất."""
+    candidates = [
+        finding
+        for finding in findings
+        if finding.get("verification") == "verified"
+        and finding.get("severity") in ("High", "Medium", "Low")
+    ]
+    candidates.sort(key=lambda finding: SEVERITY_ORDER.index(finding["severity"]))
+    actions, seen = [], set()
+    for finding in candidates:
+        info = finding["explain"]
+        key = info["key"] if not info["generic"] else finding["title"]
+        if key in seen:
+            continue
+        seen.add(key)
+        actions.append({
+            "finding_id": finding["id"],
+            "title": finding["title"],
+            "severity": finding["severity"],
+            "what": info["what"],
+            "fix": info["fix"],
+        })
+        if len(actions) == MAX_TOP_ACTIONS:
+            break
+    return actions
+
+
+def _build_summary_text(summary_count, incomplete_modules, action_count):
+    serious = summary_count.get("High", 0)
+    should_fix = summary_count.get("Medium", 0)
+    parts = []
+    if serious or should_fix:
+        found = []
+        if serious:
+            found.append(f"{serious} vấn đề nghiêm trọng")
+        if should_fix:
+            found.append(f"{should_fix} vấn đề nên sửa")
+        sentence = "Website có " + " và ".join(found) + "."
+        if action_count:
+            sentence += f" Hãy xử lý {action_count} việc dưới đây trước."
+        parts.append(sentence)
+    elif incomplete_modules:
+        parts.append("Chưa phát hiện vấn đề nghiêm trọng trong các phần đã kiểm tra xong.")
+    else:
+        parts.append(
+            "Không phát hiện vấn đề nghiêm trọng trong các kiểm tra đã chạy. "
+            "Điều này không có nghĩa website hoàn toàn an toàn, chỉ là công cụ chưa tìm thấy lỗi dễ thấy."
+        )
+
+    if incomplete_modules:
+        names = []
+        for item in incomplete_modules:
+            label, consequence = MODULE_INFO.get(
+                item["module"], (item["module"], "phần này chưa được kiểm tra")
+            )
+            names.append(f"{label} ({consequence})")
+        parts.append(
+            "Báo cáo CHƯA hoàn chỉnh vì có phần không chạy xong: "
+            + "; ".join(names)
+            + ". Vì vậy chưa thể kết luận website an toàn."
+        )
+    return " ".join(parts)
+
+
 def _calculate_risk_score(findings, incomplete_modules=None):
     module_scores = defaultdict(float)
     for finding in findings:
@@ -137,6 +222,7 @@ def generate_report(target_url, module_results, scan_duration=None, requested_ta
         if status != "success":
             incomplete_modules.append(item)
 
+    _attach_explanations(findings)
     risk = _calculate_risk_score(findings, incomplete_modules)
     summary_count = {level: 0 for level in SEVERITY_ORDER}
     verification_count = {"verified": 0, "suspected": 0}
@@ -152,6 +238,9 @@ def generate_report(target_url, module_results, scan_duration=None, requested_ta
     if incomplete_modules:
         explanation += " Báo cáo chưa hoàn chỉnh vì có module lỗi hoặc bị bỏ qua."
 
+    top_actions = _build_top_actions(findings)
+    summary_text = _build_summary_text(summary_count, incomplete_modules, len(top_actions))
+
     return {
         "target": target_url,
         "requested_target": requested_target or target_url,
@@ -161,6 +250,8 @@ def generate_report(target_url, module_results, scan_duration=None, requested_ta
         "risk_level": risk["level"],
         "risk_explanation": explanation,
         "scan_complete": not incomplete_modules,
+        "summary_text": summary_text,
+        "top_actions": top_actions,
         "summary_count": summary_count,
         "verification_count": verification_count,
         "findings": findings,

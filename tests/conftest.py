@@ -69,3 +69,63 @@ def complete_report(target="https://example.com"):
         findings=[],
     )
     return report.generate_report(target, modules, scan_duration=0.01)
+
+
+def sample_module_results(extra_findings=None, failed_modules=()):
+    """Kết quả module giả có nhiều loại finding, dùng cho test báo cáo/giao diện."""
+    modules = {
+        name: {"module": name, "status": "success", "error": None, "duration_sec": 0}
+        for name in (
+            "header_checker",
+            "dir_checker",
+            "robots_checker",
+            "cms_checker",
+            "port_checker",
+            "tls_checker",
+        )
+    }
+    modules["header_checker"].update(
+        raw_headers={},
+        missing_headers=[
+            {"header": "Content-Security-Policy", "severity": "High", "verification": "verified",
+             "confidence": "high", "description": "Thiếu CSP"},
+            {"header": "Strict-Transport-Security", "severity": "Medium", "verification": "verified",
+             "confidence": "high", "description": "Thiếu HSTS"},
+            {"header": "X-Frame-Options", "severity": "Medium", "verification": "verified",
+             "confidence": "high", "description": "Thiếu XFO"},
+            {"header": "Referrer-Policy", "severity": "Low", "verification": "verified",
+             "confidence": "high", "description": "Thiếu Referrer-Policy"},
+        ],
+        info_leak=[
+            {"header": "Server", "value": "nginx/1.18", "severity": "Info", "verification": "verified",
+             "confidence": "high", "description": "Lộ server"},
+        ],
+        findings=list(extra_findings or []),
+    )
+    modules["dir_checker"]["findings"] = [
+        {"path": ".env", "url": "https://example.com/.env", "status_code": 200, "severity": "High",
+         "verification": "verified", "confidence": "high", "description": "Lộ .env"},
+        {"path": "admin/", "url": "https://example.com/admin/", "status_code": 200, "severity": "Info",
+         "verification": "suspected", "confidence": "medium", "description": "Có trang admin"},
+    ]
+    modules["robots_checker"].update(exists=False, disallowed_paths=[])
+    modules["port_checker"].update(
+        resolved_ip=PUBLIC_IP,
+        open_ports=[{"port": 3306, "service": "MySQL", "severity": "High", "verification": "verified",
+                     "confidence": "high", "description": "MySQL mở"}],
+    )
+    modules["tls_checker"].update(
+        https_supported=True,
+        certificate={"valid": True, "hostname_matches": True},
+        protocol="TLSv1.3",
+        cipher={"name": "TLS_AES_256_GCM_SHA384", "bits": 256},
+        http_redirect={"status": "success", "redirects_to_https": True},
+        findings=[],
+    )
+    for name in failed_modules:
+        modules[name].update(status="error", error="lỗi giả lập")
+    return modules
+
+
+def sample_report(target="https://example.com", **kwargs):
+    return report.generate_report(target, sample_module_results(**kwargs), scan_duration=0.01)

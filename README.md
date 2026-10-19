@@ -165,6 +165,9 @@ python test_target/smoke_test.py
 
 ## Bảo vệ mục tiêu và SSRF
 
+> **Quét localhost:** mặc định đã bật khi app chỉ chạy trên máy này (`SCANNER_HOST` để trống hoặc là loopback). Chỉ `localhost`, `127.0.0.1`, `::1` được phép; mạng nội bộ vẫn bị chặn và website công khai không thể redirect scanner vào localhost. Tắt bằng `SCANNER_ALLOW_LOCAL=false`.
+
+
 Mặc định scanner chỉ cho HTTP/HTTPS tới IP public/global. Công cụ từ chối:
 
 - URL chứa username/password.

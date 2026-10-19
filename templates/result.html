@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_findings.html" import summary_block, score_meter, findings_panel %}
 
 {% block content %}
 <section class="report">
@@ -24,57 +25,31 @@
         </div>
     </div>
 
-    {% if not report.scan_complete %}
-    <div class="alert alert--warning">
-        Báo cáo chưa hoàn chỉnh: {{ report.incomplete_modules|length }} module lỗi hoặc bị bỏ qua.
-    </div>
-    {% endif %}
+    {{ summary_block(report) }}
 
-    <p class="risk-explanation">{{ report.risk_explanation }}</p>
+    {{ score_meter(report) }}
 
     <div class="stat-row">
         <div class="stat-tile stat-tile--high">
             <div class="stat-tile__count">{{ report.summary_count.High }}</div>
-            <div class="stat-tile__label">High</div>
+            <div class="stat-tile__label">Nghiêm trọng <small>High</small></div>
         </div>
         <div class="stat-tile stat-tile--medium">
             <div class="stat-tile__count">{{ report.summary_count.Medium }}</div>
-            <div class="stat-tile__label">Medium</div>
+            <div class="stat-tile__label">Nên sửa <small>Medium</small></div>
         </div>
         <div class="stat-tile stat-tile--low">
             <div class="stat-tile__count">{{ report.summary_count.Low }}</div>
-            <div class="stat-tile__label">Low</div>
+            <div class="stat-tile__label">Cải thiện thêm <small>Low</small></div>
         </div>
         <div class="stat-tile stat-tile--info">
             <div class="stat-tile__count">{{ report.summary_count.Info }}</div>
-            <div class="stat-tile__label">Info</div>
+            <div class="stat-tile__label">Chỉ để biết <small>Info</small></div>
         </div>
     </div>
 
     <h2 class="section-heading">Chi tiết phát hiện ({{ report.findings|length }})</h2>
-
-    {% if report.findings %}
-    <div class="finding-list">
-        {% for finding in report.findings %}
-        <div class="finding finding--{{ finding.severity|lower }}">
-            <div class="finding__top">
-                <span class="finding__severity">{{ finding.severity }}</span>
-                <span class="finding__module">{{ finding.module }}</span>
-                <span class="finding__verification">{{ "Đã xác minh" if finding.verification == "verified" else "Nghi ngờ" }}</span>
-            </div>
-            <div class="finding__title">{{ finding.title }}</div>
-            <div class="finding__desc">{{ finding.description }}</div>
-            {% if finding.evidence %}<div class="finding__detail"><strong>Bằng chứng:</strong> {{ finding.evidence }}</div>{% endif %}
-            {% if finding.cause %}<div class="finding__detail"><strong>Nguyên nhân:</strong> {{ finding.cause }}</div>{% endif %}
-            {% if finding.recommendation %}<div class="finding__detail"><strong>Khuyến nghị:</strong> {{ finding.recommendation }}</div>{% endif %}
-        </div>
-        {% endfor %}
-    </div>
-    {% else %}
-    <p class="empty-note">
-        {{ "Không phát hiện vấn đề nào với các kiểm tra đã hoàn thành." if report.scan_complete else "Không đủ dữ liệu để kết luận vì một số kiểm tra chưa hoàn thành." }}
-    </p>
-    {% endif %}
+    {{ findings_panel(report) }}
 
     <h2 class="section-heading">Trạng thái module</h2>
     <div class="status-list">
@@ -171,4 +146,8 @@
     <a href="{{ url_for('index') }}" class="btn btn--ghost back-link">Quét URL khác</a>
 
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='report.js') }}" defer></script>
 {% endblock %}
